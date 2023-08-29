@@ -1,0 +1,10 @@
+MERGE (a:Node {id: 0}) MERGE (b:Node {id: 1}) MERGE (a)-[r:RELATION {id: 0}]->(b) ON CREATE SET r.weight = 50.0;
+MERGE (a:Node {id: 0}) MERGE (b:Node {id: 2}) MERGE (a)-[r:RELATION {id: 1}]->(b) ON CREATE SET r.weight = 50.0;
+MERGE (a:Node {id: 0}) MERGE (b:Node {id: 3}) MERGE (a)-[r:RELATION {id: 2}]->(b) ON CREATE SET r.weight = 100.0;
+MERGE (a:Node {id: 1}) MERGE (b:Node {id: 3}) MERGE (a)-[r:RELATION {id: 3}]->(b) ON CREATE SET r.weight = 40.0;
+MERGE (a:Node {id: 2}) MERGE (b:Node {id: 3}) MERGE (a)-[r:RELATION {id: 4}]->(b) ON CREATE SET r.weight = 40.0;
+MERGE (a:Node {id: 2}) MERGE (b:Node {id: 4}) MERGE (a)-[r:RELATION {id: 5}]->(b) ON CREATE SET r.weight = 80.0;
+MERGE (a:Node {id: 3}) MERGE (b:Node {id: 4}) MERGE (a)-[r:RELATION {id: 6}]->(b) ON CREATE SET r.weight = 30.0;
+MERGE (a:Node {id: 3}) MERGE (b:Node {id: 5}) MERGE (a)-[r:RELATION {id: 7}]->(b) ON CREATE SET r.weight = 80.0;
+MERGE (a:Node {id: 4}) MERGE (b:Node {id: 5}) MERGE (a)-[r:RELATION {id: 8}]->(b) ON CREATE SET r.weight = 40.0;
+MERGE (a:Node {id: 4}) MERGE (b:Node {id: 2}) MERGE (a)-[r:RELATION {id: 9}]->(b) ON CREATE SET r.weight = 10.0;

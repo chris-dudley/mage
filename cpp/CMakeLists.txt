@@ -162,3 +162,4 @@ add_subdirectory(csv_utils_module)
 add_subdirectory(algo_module)
 
 add_cugraph_subdirectory(cugraph_module)
+add_subdirectory(yens_ksp_module)
