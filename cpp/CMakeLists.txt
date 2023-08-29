@@ -158,3 +158,4 @@ add_subdirectory(node_module)
 add_subdirectory(neighbors_module)
 
 add_cugraph_subdirectory(cugraph_module)
+add_subdirectory(yens_ksp_module)

@@ -93,7 +93,7 @@ streaming graph algorithms! Drop us a message on the channels below:
 - [How to install MAGE?](#how-to-install-mage)
   - [1. Use MAGE with Docker](#1-use-mage-with-docker)
     - [a) Get MAGE from Docker Hub](#a-get-mage-from-docker-hub)
-    - [b) Install MAGE with a Docker build of the repository](#2-install-mage-with-docker-build-of-the-repository)
+    - [b) Install MAGE with a Docker build of the repository](#b-install-mage-with-a-docker-build-of-the-repository)
   - [2. Installing MAGE on Linux distro from source](#2-installing-mage-on-linux-distro-from-source)
     - [Prerequisites](#prerequisites)
 - [Running MAGE](#running-mage)
@@ -143,7 +143,7 @@ preloaded with **MAGE** modules:
 docker run -p 7687:7687 -p 7444:7444 memgraph/memgraph-mage
 ```
 
-#### 2 Install MAGE with Docker build of the repository
+#### b) Install MAGE with a Docker build of the repository
 
 **0.** Make sure that you have cloned the MAGE Github repository and positioned
 yourself inside the repo in your terminal:
@@ -286,6 +286,7 @@ YIELD node, rank;
 | [uuid_generator](https://memgraph.com/docs/mage/query-modules/cpp/uuid-generator)                                | C++    | A module that generates a new universally unique identifier (UUID).                                                                                                                                                               |
 | [vrp](https://memgraph.com/docs/mage/query-modules/python/vrp)                                                   | Python | An algorithm for finding the shortest route possible between the central depot and places to be visited. The algorithm can be solved with multiple vehicles that represent a visiting fleet.                                      |
 | [weakly_connected_components](https://memgraph.com/docs/mage/query-modules/cpp/weakly-connected-components)      | C++    | A module that finds weakly connected components in a graph.                                                                                                                                                                       |
+| [yens_ksp](https://memgraph.com/docs/mage/query-modules/cpp/yens-ksp)]                                           | C++    | A module that implmenets Yen's algorithm for finding the K-shortest paths between two nodes in a graph.                                                                                  |
 
 ## Advanced configuration
 

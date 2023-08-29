@@ -1,0 +1,115 @@
+#include "yens.hpp"
+
+#include <algorithm>
+#include <queue>
+#include <functional>
+
+namespace yens_alg {
+
+bool greater_weight( const Path<>& lhs, const Path<>& rhs ) {
+    return lhs.total_weight > rhs.total_weight;
+}
+
+// Check if our path heap contains the given path.
+bool contains_path( const std::vector<Path<>>& paths, const Path<>& to_find ) {
+    for (const auto& path : paths) {
+        if (path.edges == to_find.edges) {
+            return true;
+        }
+    } 
+
+    return false;
+}
+
+std::vector<Path<>> KShortestPaths(
+    const mg_graph::GraphView<> &graph, std::uint64_t source_id, std::uint64_t sink_id,
+    std::uint64_t K, ShortestPathFunc shortest_path_func,
+    CheckAbortFunc check_abort
+) {
+    std::vector<Path<>> result;
+    // Using a heap instead of a priority_queue so that we can search the heap for
+    // duplicate paths.
+    std::vector<Path<>> possible_paths;
+
+    // Return early in cases with no paths
+    if (source_id == sink_id || K == 0) {
+        return result;
+    }
+
+    auto shortest_path = shortest_path_func(graph, source_id, sink_id, {}, {});
+    if (shortest_path.empty()) {
+        // No paths found
+        return result;
+    }
+    result.push_back(shortest_path);
+
+    if (K == 1) {
+        // Don't bother with the rest of the algorithm if K == 1
+        return result;
+    }
+    
+    for (uint64_t k = 1; k < K; k++) {
+        const auto& prev_shortest = result.back();
+        // The spur node ranges from the first node to the next to last node in the previous
+        // k-shortest path.
+        for (uint64_t spur_index = 0; spur_index < prev_shortest.size(); spur_index++) {
+            // Check if we should abort before each shortest path call, as it could take a while
+            check_abort();
+
+            // Note: On this path, we are not taking the edge at prev_shortest[spur_index]
+            const auto spur_node = prev_shortest.nodes[spur_index];
+            // Re-use spur_index for the number of edges we want to keep.
+            // If spur is index 0, we want 0 previous edges, if index 1 we want 1 edge, etc.
+            auto root_path = prev_shortest.prefix(spur_index);
+
+            // Ignoring edges and nodes instead of removing them from the graph to avoid having to
+            // rebuild the entire graph view every time, as you can't copy the view.
+            EdgeIdSet ignored_edges;
+            NodeIdSet ignored_nodes;
+
+            // Find all previous shortest paths that share same root path nodes and remove the edge
+            // used to go to the next node in that path.
+            for (const auto& prev_path : result) {
+                if (prev_path.has_prefix(root_path)) {
+                    // Ignore outgoing edge from spur node to next node in previous shortest path
+                    ignored_edges.insert(prev_path.edges[spur_index]);
+                }
+            }
+
+            // Ignore all nodes in the root path except the spur node
+            for (size_t i = 0; i < spur_index; i ++) {
+                ignored_nodes.insert(root_path.nodes[i]);
+            }
+
+            auto spur_path = shortest_path_func(graph, spur_node, sink_id, ignored_edges, ignored_nodes);
+            if (spur_path.empty()) {
+                // Maybe break entirely? Is there any chance of finding other paths if we don't find
+                // one here?
+                continue;
+            }
+
+            // Join together the root and spur paths
+            auto total_path = root_path.join(spur_path);
+
+            // If total_path is not in possible_paths, add it to the heap
+            if (!contains_path(possible_paths, total_path)) {
+                possible_paths.push_back(total_path);
+                std::push_heap(possible_paths.begin(), possible_paths.end(), greater_weight);
+            }
+        }
+
+        if (possible_paths.empty()) {
+            // No spur paths left, don't bother checking for any more paths.
+            break;
+        }
+
+        // Pop the minimum weighted path from the heap and add it to the result
+        std::pop_heap(possible_paths.begin(), possible_paths.end(), greater_weight);
+        result.push_back(possible_paths.back());
+        possible_paths.pop_back();
+    }
+
+    return result;
+}
+
+} // namespace yens_alg
