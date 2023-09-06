@@ -15,26 +15,11 @@ constexpr const uint64_t INVALID_NODE = std::numeric_limits<uint64_t>::max();
 constexpr const uint64_t INVALID_EDGE = std::numeric_limits<uint64_t>::max();
 constexpr const double INFINITY = std::numeric_limits<double>::infinity();
 
-struct NodeAndDistance {
-    uint64_t NodeId;
-    double Weight;
-};
 
-constexpr double operator<=>( const NodeAndDistance& lhs, const NodeAndDistance& rhs ) {
-    return lhs.Weight - rhs.Weight;
-}
+using NodeAndDistance = std::pair<uint64_t, double>;
 
 bool NodeAndDistanceGreater(const NodeAndDistance &a, const NodeAndDistance &b) {
-    return a.Weight > b.Weight;
-}
-
-template<typename K, typename V>
-const V& get_default(const std::unordered_map<K, V>& map, const K& key, const V& default_value) {
-    auto iter = map.find(key);
-    if (iter != map.end()) {
-        return iter->second;
-    }
-    return default_value;
+    return a.second > b.second;
 }
 
 Path<> Dijkstra(
@@ -46,68 +31,75 @@ Path<> Dijkstra(
         return result;
     }
 
-    // Distance from start node to this one
-    std::unordered_map<uint64_t, double> distances;
-    // ID of node used to get to this one
-    std::unordered_map<uint64_t, uint64_t> previous;
-    // ID of edge used to get to this one
-    std::unordered_map<uint64_t, uint64_t> edges;
+    const auto &verticies = graph.Nodes();
+
+    // `shortest_distance[i]` holds the shortest distance from `source` to `i`.
+    std::vector<double> shortest_distance(verticies.size(), INFINITY);
+    // `added[i]` will be true if vertex `i` is included in the shortest path tree or
+    // shortest distance from `source` to `i` is finalized.
+    std::vector<bool> added(verticies.size(), false);
+    // `parent[i]` is the ID of the parent node of vertex `i` in the shortest path tree.
+    std::vector<uint64_t> parent(verticies.size(), INVALID_NODE);
+    // `edge_in[i]` is the ID of the edge used to reach node `i` in the shortest path tree.
+    std::vector<uint64_t> edge_in(verticies.size(), INVALID_EDGE);
+
+    // Distance of source vertex to itself is always 0
+    shortest_distance[source_id] = 0.0;
+
+    // node_queue contains a queue of nodes to visit, sorted by the total cost to
+    // reach that node. The top of the queue is the node with the minimum distance.
     std::priority_queue<
         // std::greater makes it a min queue
         NodeAndDistance, std::vector<NodeAndDistance>, std::greater<NodeAndDistance>
     > node_queue;
 
-    distances[source_id] = 0.0;
-
     // Seed queue with source node
     node_queue.emplace(source_id, 0.0);
 
     while (!node_queue.empty()) {
-        auto current = node_queue.top();
+        auto current_node = node_queue.top().first;
         node_queue.pop();
 
-        if (current.NodeId == sink_id) {
+        if (current_node == sink_id) {
             // Found the target, we can stop now
             break;
         }
 
-        double current_distance = get_default(distances, current.NodeId, INFINITY);
-
-        if (current.Weight > current_distance) {
-            // Node+Weight was added before another, better path was found, ignore.
+        if (added[current_node]) {
+            // Don't revisit nodes.
             continue;
         }
+        added[current_node] = true;
 
-        for (auto neighbor : graph.OutNeighbours(current.NodeId)) {
+        for (auto neighbor : graph.OutNeighbours(current_node)) {
             if (ignored_edges.contains(neighbor.edge_id) || ignored_nodes.contains(neighbor.node_id)) {
                 continue;
             }
-            double edge_weight = graph.GetWeight(neighbor.edge_id);
-            double neighbor_weight = current_distance + edge_weight;
+            double edge_weight = graph.IsWeighted() ? graph.GetWeight(neighbor.edge_id) : 1.0;
+            double neighbor_weight = shortest_distance[current_node] + edge_weight;
 
-            if (neighbor_weight < get_default(distances, neighbor.node_id, INFINITY)) {
-                distances[neighbor.node_id] = neighbor_weight;
-                previous[neighbor.node_id] = current.NodeId;
-                edges[neighbor.node_id] = neighbor.edge_id;
+            if (neighbor_weight < shortest_distance[neighbor.node_id]) {
+                shortest_distance[neighbor.node_id] = neighbor_weight;
+
+                parent[neighbor.node_id] = current_node;
+                edge_in[neighbor.node_id] = neighbor.edge_id;
                 node_queue.emplace(neighbor.node_id, neighbor_weight);
             }
         }
     }
 
-    if(!previous.contains(sink_id)) {
+    if(parent[sink_id] == INVALID_EDGE) {
         // Return empty path
         return result;
     }
 
-    uint64_t current_node = sink_id;
     std::vector<uint64_t> edges_stack;
-    while (current_node != source_id) {
-        edges_stack.push_back(edges.at(current_node));
-        current_node = previous.at(current_node);
+    for (uint64_t current_node = sink_id; current_node != source_id; current_node = parent[current_node]) {
+        edges_stack.push_back(edge_in[current_node]);
     }
 
     for (auto edge_id : std::views::reverse(edges_stack)) {
-        result.add_edge(graph.GetEdge(edge_id), graph.GetWeight(edge_id));
+        result.add_edge(graph.GetEdge(edge_id), graph.IsWeighted() ? graph.GetWeight(edge_id) : 1.0);
     }
     return result;
 }

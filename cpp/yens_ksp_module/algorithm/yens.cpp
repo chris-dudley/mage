@@ -49,10 +49,22 @@ std::vector<Path<>> KShortestPaths(
     }
     
     for (uint64_t k = 1; k < K; k++) {
+        // k-1'th path
         const auto& prev_shortest = result.back();
+        uint64_t paths_still_needed = K - k;
         // The spur node ranges from the first node to the next to last node in the previous
         // k-shortest path.
-        for (uint64_t spur_index = 0; spur_index < prev_shortest.size(); spur_index++) {
+        
+        // We can skip any edges that are shared with the k-2'th path, since we've already
+        // calculated spurs from those.
+        uint64_t spur_index = 0;
+        if (k > 1) {
+            const auto& ancestor = result[k-2];
+            while (spur_index < ancestor.size() && spur_index < prev_shortest.size() && prev_shortest.edges[spur_index] == ancestor.edges[spur_index]) {
+                spur_index++;
+            }
+        }
+        for (; spur_index < prev_shortest.size(); spur_index++) {
             // Check if we should abort before each shortest path call, as it could take a while
             check_abort();
 
@@ -83,8 +95,7 @@ std::vector<Path<>> KShortestPaths(
 
             auto spur_path = shortest_path_func(graph, spur_node, sink_id, ignored_edges, ignored_nodes);
             if (spur_path.empty()) {
-                // Maybe break entirely? Is there any chance of finding other paths if we don't find
-                // one here?
+                // No more available paths from this node.
                 continue;
             }
 
