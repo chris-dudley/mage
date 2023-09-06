@@ -196,6 +196,68 @@ TEST(YensKSP, DijkstraSmallGraphWithCycle) {
     ASSERT_EQ(path, expected_path);
 }
 
+/*
+ *                  ┌─────────── -100 ─────────────┐
+ *                ┌─▼─┐                          ┌─┴─┐
+ *   ┌──50───────►│ 2 ├─────────┬────────80─────►│ 4 │
+ *   │            └───┘         │                └▲─┬┘
+ *   │                         40                 │ │
+ *   │                          │                 │ 40
+ * ┌─┴─┐                       ┌▼──┐              │ │
+ * │ 0 ├────────100───────────►│ 3 ├──┬─-30───────┘ │
+ * └─┬─┘                       └▲──┘  │             │
+ *   │                          │     │          ┌──▼┐
+ *   │                         40     └──80─────►│ 5 │
+ *   │                          │                └───┘
+ *   │            ┌───┐         │
+ *   └──50───────►│ 1 ├─────────┘
+ *                └───┘
+ */
+TEST(YensKSP, DijkstraSmallGraphWithNegativeCycle) {
+    auto G = mg_generate::BuildWeightedGraph(
+        6,
+        {
+            /* 0*/ {{0, 1}, 50.0}, /* 1*/ {{0, 2}, 50.0}, /* 2*/ {{0, 3}, 100.0},
+            /* 3*/ {{1, 3}, 40.0},
+            /* 4*/ {{2, 3}, 40.0}, /* 5*/ {{2, 4}, 80.0},
+            /* 6*/ {{3, 4}, -30.0}, /* 7*/ {{3, 5}, 80.0},
+            /* 8*/ {{4, 5}, 40.0},
+            // new edges
+            /* 9*/ {{4, 2}, -100.0},
+        },
+        mg_graph::GraphType::kDirectedGraph
+    );
+    // The path isn't correct due to the negative edges, but it should at least return
+    // something.
+    yens_alg::Path<> expected_path{
+        {0, 1, 3, 4, 5}, // nodes
+        {0, 3, 6, 8},    // edges
+        {0.0, 50.0, 90.0, 60.0, 100.0}, // weights
+        100.0 // total weight
+    };
+
+    auto path = yens_alg::Dijkstra(*G, 0, 5, {}, {});
+    ASSERT_EQ(path, expected_path);
+}
+
+TEST(YensKSP, DijkstraHugeFullyConnectedCyclicGraph) {
+    // Create a graph where each vertex is connected to the next 10 verticies, creating a huge
+    // interconnected cycle.
+    const uint64_t NUM_VERTICIES = 10'000;
+    const uint64_t EDGES_PER_VERTEX = 10;
+    auto G = mg_generate::BuildGraph(NUM_VERTICIES, {}, mg_graph::GraphType::kDirectedGraph);
+    for (uint64_t i = 0; i < NUM_VERTICIES; i++) {
+        for (uint64_t mod = 1; mod <= EDGES_PER_VERTEX; mod++) {
+            uint64_t next_node = (i + mod) % NUM_VERTICIES;
+            G->CreateEdge(i, next_node, mg_graph::GraphType::kDirectedGraph);
+        }
+    }
+
+    // Find a path from 0 to NUM_VERTICIES-1
+    auto path = yens_alg::Dijkstra(*G, 0, NUM_VERTICIES-1, {}, {});
+    ASSERT_EQ(path.empty(), false);
+}
+
 TEST(YensKSP, YensEmptyGraph) {
     auto G = mg_generate::BuildGraph(0, {});
 

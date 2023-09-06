@@ -51,6 +51,9 @@ void YensKShortestPaths(mgp_list *args, mgp_graph *memgraph_graph, mgp_result *r
         const auto default_weight = arguments[args_idx++].ValueDouble();
         const auto algo_num = arguments[args_idx++].ValueInt();
 
+        bool weighted = ! weight_property.empty();
+        const char * weight_prop_cstr = weighted ? weight_property.data() : nullptr;
+
         if (K < 1) {
             throw mgp::ValueException("K cannot be negative");
         }
@@ -71,11 +74,11 @@ void YensKShortestPaths(mgp_list *args, mgp_graph *memgraph_graph, mgp_result *r
         auto graph_view_ptr = subgraph ?
             mg_utility::GetSubgraphView(
                 memgraph_graph, result, memory, subgraph_nodes, subgraph_edges, mg_graph::GraphType::kDirectedGraph,
-                !weight_property.empty(), weight_property.data(), default_weight)
+                weighted, weight_prop_cstr, default_weight)
             :
             mg_utility::GetGraphView(
                 memgraph_graph, result, memory, mg_graph::GraphType::kDirectedGraph,
-                !weight_property.empty(), weight_property.data(), default_weight);
+                weighted, weight_prop_cstr, default_weight);
 
         const mg_graph::GraphView<>& graph_view = *graph_view_ptr;
 
