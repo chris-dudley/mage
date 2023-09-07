@@ -49,12 +49,11 @@ void YensKShortestPaths(mgp_list *args, mgp_graph *memgraph_graph, mgp_result *r
         const auto K = arguments[args_idx++].ValueInt();
         const auto weight_property = arguments[args_idx++].ValueString();
         const auto default_weight = arguments[args_idx++].ValueDouble();
-        const auto algo_num = arguments[args_idx++].ValueInt();
 
         bool weighted = ! weight_property.empty();
         const char * weight_prop_cstr = weighted ? weight_property.data() : nullptr;
 
-        if (K < 1) {
+        if (K < 0) {
             throw mgp::ValueException("K cannot be negative");
         }
         if (K == 0) {
@@ -62,14 +61,7 @@ void YensKShortestPaths(mgp_list *args, mgp_graph *memgraph_graph, mgp_result *r
             return;
         }
 
-        yens_alg::ShortestPathFunc sp_func;
-        switch (algo_num) {
-            case ALGO_DIJKSTRA:
-                sp_func = yens_alg::Dijkstra;
-                break;
-            default:
-                throw mgp::ValueException("Invalid shortest path algorithm identifier");
-        }
+        yens_alg::ShortestPathFunc sp_func = yens_alg::Dijkstra;
 
         auto graph_view_ptr = subgraph ?
             mg_utility::GetSubgraphView(
@@ -176,7 +168,6 @@ extern "C" int mgp_init_module(struct mgp_module *module, struct mgp_memory *mem
                 mgp::Parameter(yens_alg::kArgumentK, mgp::Type::Int, 1L),
                 mgp::Parameter(yens_alg::kArgumentRelationshipWeightProperty, mgp::Type::String, ""),
                 mgp::Parameter(yens_alg::kArgumentDefaultWeight, mgp::Type::Double, 1.0),
-                mgp::Parameter(yens_alg::kArgumentPathAlgo, mgp::Type::Int, ALGO_DIJKSTRA),
             },
             {
                 mgp::Return(yens_alg::kReturnIndex, mgp::Type::Int),
@@ -199,7 +190,6 @@ extern "C" int mgp_init_module(struct mgp_module *module, struct mgp_memory *mem
                 mgp::Parameter(yens_alg::kArgumentK, mgp::Type::Int, 1L),
                 mgp::Parameter(yens_alg::kArgumentRelationshipWeightProperty, mgp::Type::String, ""),
                 mgp::Parameter(yens_alg::kArgumentDefaultWeight, mgp::Type::Double, 1.0),
-                mgp::Parameter(yens_alg::kArgumentPathAlgo, mgp::Type::Int, ALGO_DIJKSTRA),
             },
             {
                 mgp::Return(yens_alg::kReturnIndex, mgp::Type::Int),

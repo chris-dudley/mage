@@ -56,11 +56,15 @@ std::vector<Path<>> KShortestPaths(
         // k-shortest path.
         
         // We can skip any edges that are shared with the k-2'th path, since we've already
-        // calculated spurs from those.
+        // calculated spurs from those source nodes. (Lawler's modification).
         uint64_t spur_index = 0;
         if (k > 1) {
             const auto& ancestor = result[k-2];
-            while (spur_index < ancestor.size() && spur_index < prev_shortest.size() && prev_shortest.edges[spur_index] == ancestor.edges[spur_index]) {
+            const auto max_prefix_size = std::min(ancestor.size(), prev_shortest.size());
+            while (
+                spur_index < max_prefix_size
+                && prev_shortest.edges[spur_index] == ancestor.edges[spur_index]
+            ) {
                 spur_index++;
             }
         }

@@ -240,11 +240,12 @@ TEST(YensKSP, DijkstraSmallGraphWithNegativeCycle) {
     ASSERT_EQ(path, expected_path);
 }
 
-TEST(YensKSP, DijkstraHugeFullyConnectedCyclicGraph) {
+TEST(YensKSP, DijkstraHugeCyclicGraph) {
     // Create a graph where each vertex is connected to the next 10 verticies, creating a huge
     // interconnected cycle.
     const uint64_t NUM_VERTICIES = 10'000;
     const uint64_t EDGES_PER_VERTEX = 10;
+    const uint64_t SHORTEST_PATH_EDGES = (NUM_VERTICIES / EDGES_PER_VERTEX);
     auto G = mg_generate::BuildGraph(NUM_VERTICIES, {}, mg_graph::GraphType::kDirectedGraph);
     for (uint64_t i = 0; i < NUM_VERTICIES; i++) {
         for (uint64_t mod = 1; mod <= EDGES_PER_VERTEX; mod++) {
@@ -256,6 +257,8 @@ TEST(YensKSP, DijkstraHugeFullyConnectedCyclicGraph) {
     // Find a path from 0 to NUM_VERTICIES-1
     auto path = yens_alg::Dijkstra(*G, 0, NUM_VERTICIES-1, {}, {});
     ASSERT_EQ(path.empty(), false);
+    ASSERT_EQ(path.size(), SHORTEST_PATH_EDGES);
+    ASSERT_DOUBLE_EQ(path.total_weight, (SHORTEST_PATH_EDGES) * 1.0);
 }
 
 TEST(YensKSP, YensEmptyGraph) {
