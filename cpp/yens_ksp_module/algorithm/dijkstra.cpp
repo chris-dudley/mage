@@ -72,7 +72,9 @@ Path<> Dijkstra(
         added[current_node] = true;
 
         for (auto neighbor : graph.OutNeighbours(current_node)) {
-            if (ignored_edges.contains(neighbor.edge_id) || ignored_nodes.contains(neighbor.node_id)) {
+            // Don't update parent + edge in if we've already added the neighbor to the shortest path,
+            // or we should ignore the edge or neighbor node.
+            if (added[neighbor.node_id] || ignored_edges.contains(neighbor.edge_id) || ignored_nodes.contains(neighbor.node_id)) {
                 continue;
             }
             double edge_weight = graph.IsWeighted() ? graph.GetWeight(neighbor.edge_id) : 1.0;
