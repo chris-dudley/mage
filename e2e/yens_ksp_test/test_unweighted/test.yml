@@ -38,15 +38,15 @@ output:
     target_id: 5
     total_cost: 3
     costs: [0, 1, 2, 3]
-    node_ids: [0, 3, 4, 5]
-    edge_ids: [2, 6, 8]
+    node_ids: [0, 2, 3, 5]
+    edge_ids: [1, 4, 7]
   - index: 3
     source_id: 0
     target_id: 5
     total_cost: 3
     costs: [0, 1, 2, 3]
-    node_ids: [0, 2, 3, 5]
-    edge_ids: [1, 4, 7]
+    node_ids: [0, 3, 4, 5]
+    edge_ids: [2, 6, 8]
   - index: 4
     source_id: 0
     target_id: 5
