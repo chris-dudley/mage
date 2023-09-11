@@ -108,7 +108,7 @@ std::vector<Path<>> KShortestPaths(
             EdgeIdSet ignored_edges;
             NodeIdSet ignored_nodes;
 
-            // Find all previous shortest paths that share same root path nodes and remove the edge
+            // Find all previous shortest paths that share same root path edges and remove the edge
             // used to go to the next node in that path.
             for (const auto& prev_path : result) {
                 if (prev_path.has_prefix(root_path)) {
@@ -118,23 +118,40 @@ std::vector<Path<>> KShortestPaths(
             }
 
             // Ignore all nodes in the root path except the spur node
-            for (size_t i = 0; i < spur_index; i ++) {
+            for (size_t i = 0; i < spur_index; i++) {
                 ignored_nodes.insert(root_path.nodes[i]);
             }
 
-            auto spur_path = shortest_path_func(graph, spur_node, sink_id, ignored_edges, ignored_nodes);
-            if (spur_path.empty()) {
-                // No more available paths from this node.
-                continue;
+            // Try all remaining spurs from this node
+            size_t remaining_out_edges = 0;
+            for (const auto& neighbor : graph.OutNeighbours(spur_node)) {
+                if (!ignored_edges.contains(neighbor.edge_id)) {
+                    remaining_out_edges += 1;
+                }
             }
+            if (remaining_out_edges == 0) {
+                // All edges out from this node exhausted, continue
+                continue;
+            } 
 
-            // Join together the root and spur paths
-            auto total_path = root_path.join(spur_path);
+            while (remaining_out_edges-- > 0) {
+                auto spur_path = shortest_path_func(graph, spur_node, sink_id, ignored_edges, ignored_nodes);
+                if (spur_path.empty()) {
+                    // No more available paths from this node.
+                    break;
+                }
 
-            // If total_path is not in possible_paths, add it to the heap
-            if (!contains_path(possible_paths, total_path)) {
-                possible_paths.push_back(total_path);
-                std::push_heap(possible_paths.begin(), possible_paths.end(), greater_weight);
+                // Ignore newly taken edge for further attempts
+                ignored_edges.insert(spur_path.edges[0]);
+
+                // Join together the root and spur paths
+                auto total_path = root_path.join(spur_path);
+
+                // If total_path is not in possible_paths, add it to the heap
+                if (!contains_path(possible_paths, total_path)) {
+                    possible_paths.push_back(total_path);
+                    std::push_heap(possible_paths.begin(), possible_paths.end(), greater_weight);
+                }
             }
         }
 
