@@ -240,6 +240,40 @@ TEST(YensKSP, DijkstraSmallGraphWithNegativeCycle) {
     ASSERT_EQ(path, expected_path);
 }
 
+/*
+ *             ┌───┐         ┌───┐
+ *   ┌─────────┤ 1 ├─────────┤ 3 ├─────────┐
+ *   │         └─┬─┘\       /└─┬─┘         │
+ *   │           │   \     /   │           │
+ *   │           │    \   /    │           │
+ * ┌─┴─┐         │     \ /     │         ┌─┴─┐
+ * │ 0 │         │      x      │         │ 5 │
+ * └─┬─┘         │     / \     │         └─┬─┘
+ *   │           │    /   \    │           │
+ *   │         ┌─┴─┐ /     \ ┌─┴─┐         │
+ *   └─────────┤ 2 ├─────────┤ 4 ├─────────┘
+ *             └───┘         └───┘
+ */
+TEST(YensKSP, DijkstraAllNegativeCycles) {
+    // This isn't technically a well-formed graph for Dijstra's, but we just want to
+    // make sure it finishes.
+    auto G = mg_generate::BuildWeightedGraph(
+        6,
+        {
+            /* 0*/ {{0, 1}, -1.0}, /* 1*/ {{0, 2}, -1.0},
+            /* 2*/ {{1, 0}, -1.0}, /* 3*/ {{1, 2}, -1.0}, /* 4*/ {{1, 3}, -1.0}, /* 5*/ {{1, 4}, -1.0},
+            /* 6*/ {{2, 0}, -1.0}, /* 7*/ {{2, 1}, -1.0}, /* 8*/ {{2, 3}, -1.0}, /* 9*/ {{2, 4}, -1.0},
+            /*10*/ {{3, 1}, -1.0}, /*11*/ {{3, 2}, -1.0}, /*12*/ {{3, 4}, -1.0}, /*13*/ {{3, 5}, -1.0},
+            /*14*/ {{4, 1}, -1.0}, /*15*/ {{4, 2}, -1.0}, /*16*/ {{4, 3}, -1.0}, /*17*/ {{4, 5}, -1.0},
+            /*18*/ {{5, 3}, -1.0}, /*19*/ {{5, 4}, -1.0}
+        },
+        mg_graph::GraphType::kDirectedGraph
+    );
+    auto path = yens_alg::Dijkstra(*G, 0, 5, {}, {});
+    ASSERT_FALSE(path.empty());
+    ASSERT_EQ(path.size(), 5);
+}
+
 TEST(YensKSP, DijkstraHugeCyclicGraph) {
     // Create a graph where each vertex is connected to the next 10 verticies, creating a huge
     // interconnected cycle.
