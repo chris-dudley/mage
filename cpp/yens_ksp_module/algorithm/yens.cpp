@@ -21,6 +21,17 @@ bool contains_path( const std::vector<Path<>>& paths, const Path<>& to_find ) {
     return false;
 }
 
+// Returns the indicies of paths in `paths` that have `total_weight == target_weight`, up to `limit` entries.
+std::vector<size_t> find_same_weight_paths(const std::vector<Path<>>& paths, double target_weight, uint64_t limit) {
+    std::vector<size_t> result;
+    for (size_t i = 0; i < paths.size() && result.size() < limit; i++) {
+        if (paths[i].total_weight == target_weight) {
+            result.push_back(i);
+        }
+    }
+    return result;
+}
+
 std::vector<Path<>> KShortestPaths(
     const mg_graph::GraphView<> &graph, std::uint64_t source_id, std::uint64_t sink_id,
     std::uint64_t K, ShortestPathFunc shortest_path_func,
@@ -52,6 +63,20 @@ std::vector<Path<>> KShortestPaths(
         // k-1'th path
         const auto& prev_shortest = result.back();
         uint64_t paths_still_needed = K - k;
+
+        // Check if we have at least `paths_still_needed` paths with the same weight as `prev_shortest`
+        // in `possible_paths`. If so, we will not find any shorter paths than that, so just add those
+        // to the result and return.
+        if (possible_paths.size() >= paths_still_needed) {
+            auto same_weight_path_indicies = find_same_weight_paths(possible_paths, prev_shortest.total_weight, paths_still_needed);
+            if (same_weight_path_indicies.size() == paths_still_needed) {
+                for (size_t i = 0; i < same_weight_path_indicies.size(); i++) {
+                    result.push_back(std::move(possible_paths[i]));
+                }
+                return result;
+            }
+        }
+
         // The spur node ranges from the first node to the next to last node in the previous
         // k-shortest path.
         
@@ -120,7 +145,7 @@ std::vector<Path<>> KShortestPaths(
 
         // Pop the minimum weighted path from the heap and add it to the result
         std::pop_heap(possible_paths.begin(), possible_paths.end(), greater_weight);
-        result.push_back(possible_paths.back());
+        result.push_back(std::move(possible_paths.back()));
         possible_paths.pop_back();
     }
 

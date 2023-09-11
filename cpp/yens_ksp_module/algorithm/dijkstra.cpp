@@ -93,13 +93,14 @@ Path<> Dijkstra(
         return result;
     }
 
-    std::vector<uint64_t> edges_stack;
+    std::vector<std::pair<uint64_t, double>> edges_stack;
     for (uint64_t current_node = sink_id; current_node != source_id; current_node = parent[current_node]) {
-        edges_stack.push_back(edge_in[current_node]);
+        edges_stack.emplace_back(edge_in[current_node], shortest_distance[current_node]);
     }
 
-    for (auto edge_id : std::views::reverse(edges_stack)) {
-        result.add_edge(graph.GetEdge(edge_id), graph.IsWeighted() ? graph.GetWeight(edge_id) : 1.0);
+    for (auto [edge_id, cummulative_weight] : std::views::reverse(edges_stack)) {
+        auto edge = graph.GetEdge(edge_id);
+        result.add_edge(edge, cummulative_weight);
     }
     return result;
 }
