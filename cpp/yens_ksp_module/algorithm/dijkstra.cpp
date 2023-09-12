@@ -71,21 +71,21 @@ Path<> Dijkstra(
         }
         added[current_node] = true;
 
-        for (auto neighbor : graph.OutNeighbours(current_node)) {
+        for (const auto& neighbor : graph.OutNeighbours(current_node)) {
             // Don't update parent + edge in if we've already added the neighbor to the shortest path,
             // or we should ignore the edge or neighbor node.
             if (added[neighbor.node_id] || ignored_edges.contains(neighbor.edge_id) || ignored_nodes.contains(neighbor.node_id)) {
                 continue;
             }
             double edge_weight = graph.IsWeighted() ? graph.GetWeight(neighbor.edge_id) : 1.0;
-            double neighbor_weight = shortest_distance[current_node] + edge_weight;
+            double new_distance = shortest_distance[current_node] + edge_weight;
 
-            if (neighbor_weight < shortest_distance[neighbor.node_id]) {
-                shortest_distance[neighbor.node_id] = neighbor_weight;
+            if (shortest_distance[neighbor.node_id] > new_distance) {
+                shortest_distance[neighbor.node_id] = new_distance;
 
                 parent[neighbor.node_id] = current_node;
                 edge_in[neighbor.node_id] = neighbor.edge_id;
-                node_queue.emplace(neighbor.node_id, neighbor_weight);
+                node_queue.emplace(neighbor.node_id, new_distance);
             }
         }
     }
@@ -95,14 +95,14 @@ Path<> Dijkstra(
         return result;
     }
 
-    std::vector<std::pair<uint64_t, double>> edges_stack;
+    // (edge_id, from_node, to_node, cummulative_weight)
+    std::vector<std::tuple<uint64_t, uint64_t, uint64_t, double>> edges_stack;
     for (uint64_t current_node = sink_id; current_node != source_id; current_node = parent[current_node]) {
-        edges_stack.emplace_back(edge_in[current_node], shortest_distance[current_node]);
+        edges_stack.emplace_back(edge_in[current_node], parent[current_node], current_node, shortest_distance[current_node]);
     }
 
-    for (auto [edge_id, cummulative_weight] : std::views::reverse(edges_stack)) {
-        auto edge = graph.GetEdge(edge_id);
-        result.add_edge(edge, cummulative_weight);
+    for (auto [edge_id, from_node, to_node, cummulative_weight] : std::views::reverse(edges_stack)) {
+        result.add_edge(edge_id, from_node, to_node, cummulative_weight);
     }
     return result;
 }
