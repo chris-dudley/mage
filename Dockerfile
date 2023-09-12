@@ -40,29 +40,37 @@ ENV LD_LIBRARY_PATH /usr/lib/memgraph/query_modules
 # Memgraph listens for Bolt Protocol on this port by default.
 EXPOSE 7687
 
-FROM base as dev
+FROM base as dev-base
 
 WORKDIR /mage
-COPY . /mage
 
-#MAGE
+COPY ./python/requirements.txt /mage/python/
+COPY ./python/tests/requirements.txt /mage/python/tests/requirements.txt
+
+#MAGE dependencies
 RUN curl https://sh.rustup.rs -sSf | sh -s -- -y \
     && export PATH="/root/.cargo/bin:${PATH}" \
     && python3 -m  pip install -r /mage/python/requirements.txt \
     && python3 -m  pip install -r /mage/python/tests/requirements.txt \
-    && python3 -m  pip install torch-sparse torch-cluster torch-spline-conv torch-geometric torch-scatter -f https://data.pyg.org/whl/torch-1.12.0+cu102.html\
-    && python3 /mage/setup build -p /usr/lib/memgraph/query_modules/
+    && python3 -m  pip install torch-sparse torch-cluster torch-spline-conv torch-geometric torch-scatter -f https://data.pyg.org/whl/torch-1.12.0+cu102.html
 
 #DGL build from source
 RUN git clone --recurse-submodules -b 0.9.x https://github.com/dmlc/dgl.git   \
     && cd dgl && mkdir build && cd build && cmake .. \
     && make -j4 && cd ../python && python3 setup.py install
 
+# Separate stage for building the query modules so you don't have to build torch and dgl from scratch every time.
+FROM dev-base as dev
+
+WORKDIR /mage
+COPY . /mage
+
+RUN export PATH="/root/.cargo/bin:${PATH}" \
+    && python3 /mage/setup build -p /usr/lib/memgraph/query_modules/
+
 USER memgraph
 ENTRYPOINT ["/usr/lib/memgraph/memgraph"]
 CMD [""]
-
-
 
 FROM base as prod
 

@@ -62,6 +62,15 @@ struct Path {
     ///     node in this path.
     void add_edge(const mg_graph::Edge<TSize>& edge, double cummulative_weight);
 
+    /// @brief Adds an edge from a graph view to the path.
+    /// @param id The ID of the edge being added.
+    /// @param from ID of the node this edge leads from. Must be the same as the last node in the path.
+    /// @param to ID of the node this edge leads to.
+    /// @param cummulative_weight The cummulative weight of the path after traveling this edge.
+    /// @throws std::invalid_argument if this path is not empty and edge.from does not match the last
+    ///     node in this path.
+    void add_edge(TSize id, TSize from, TSize to, double cummulative_weight);
+
     /// @brief Creates and returns a Path representing the first `length` edges of this path.
     ///     If length is 0, the resulting path will be empty, including the nodes.
     /// @param length The length (in edges) of the path prefix to generate.
@@ -120,6 +129,18 @@ void Path<TSize>::add_edge(const mg_graph::Edge<TSize>& edge, double cummulative
     weights.push_back(cummulative_weight);
     total_weight = cummulative_weight;
 }
+
+template <typename TSize>
+void Path<TSize>::add_edge(TSize id, TSize from, TSize to, double cummulative_weight) {
+    if (nodes.back() != from) {
+        throw std::invalid_argument("edge.from does not match last node in path");
+    }
+    nodes.push_back(to);
+    edges.push_back(id);
+    weights.push_back(cummulative_weight);
+    total_weight = cummulative_weight;
+}
+
 
 template <typename TSize>
 Path<TSize> Path<TSize>::prefix(TSize length) const {
