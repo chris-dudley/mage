@@ -5,7 +5,7 @@
 
 #include "shortest_path.hpp"
 
-namespace yens_alg {
+namespace shortest_paths {
 
 /* k_shortest_paths constants */
 constexpr const std::string_view kProcedureKShortestPaths = "k_shortest_paths";
@@ -45,4 +45,4 @@ std::vector<Path<>> KShortestPaths(
     CheckAbortFunc check_abort
 );
 
-} // namespace yens_alg
+} // namespace shortest_paths

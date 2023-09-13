@@ -4,7 +4,7 @@
 #include <queue>
 #include <functional>
 
-namespace yens_alg {
+namespace shortest_paths {
 
 bool greater_weight( const Path<>& lhs, const Path<>& rhs ) {
     return lhs.total_weight > rhs.total_weight;
@@ -169,4 +169,4 @@ std::vector<Path<>> KShortestPaths(
     return result;
 }
 
-} // namespace yens_alg
+} // namespace shortest_paths

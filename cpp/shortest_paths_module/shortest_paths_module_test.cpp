@@ -10,7 +10,7 @@
 
 void check_abort_noop() {}
 
-bool CheckPaths(const std::vector<yens_alg::Path<>>& paths, const std::vector<yens_alg::Path<>>& expected) {
+bool CheckPaths(const std::vector<shortest_paths::Path<>>& paths, const std::vector<shortest_paths::Path<>>& expected) {
     std::multimap<double, size_t> cost_to_path_index;
     for (size_t i = 0; i < expected.size(); i++) {
         cost_to_path_index.emplace(expected[i].total_weight, i);
@@ -45,26 +45,26 @@ bool CheckPaths(const std::vector<yens_alg::Path<>>& paths, const std::vector<ye
     return true;
 }
 
-TEST(YensKSP, DijkstraEmptyGraph) {
+TEST(ShortestPaths, DijkstraEmptyGraph) {
     auto G = mg_generate::BuildGraph(0, {});
 
-    auto path = yens_alg::Dijkstra(*G, 0, 0, {}, {});
+    auto path = shortest_paths::Dijkstra(*G, 0, 0, {}, {});
 
     ASSERT_TRUE(path.empty());
 }
 
-TEST(YensKSP, DijkstraSingleNode) {
+TEST(ShortestPaths, DijkstraSingleNode) {
     auto G = mg_generate::BuildGraph(1, {});
 
-    auto path = yens_alg::Dijkstra(*G, 0, 0, {}, {});
+    auto path = shortest_paths::Dijkstra(*G, 0, 0, {}, {});
 
     ASSERT_TRUE(path.empty());
 }
 
-TEST(YensKSP, DijkstraDisconnectedNodes) {
+TEST(ShortestPaths, DijkstraDisconnectedNodes) {
     auto G = mg_generate::BuildGraph(10, {});
 
-    auto path = yens_alg::Dijkstra(*G, 0, 9, {}, {});
+    auto path = shortest_paths::Dijkstra(*G, 0, 9, {}, {});
 
     ASSERT_TRUE(path.empty());
 }
@@ -85,7 +85,7 @@ TEST(YensKSP, DijkstraDisconnectedNodes) {
  *   └──50───────►│ 1 ├─────────┘
  *                └───┘
  */
-TEST(YensKSP, DijkstraSmallAcyclicGraph) {
+TEST(ShortestPaths, DijkstraSmallAcyclicGraph) {
     auto G = mg_generate::BuildWeightedGraph(
         6,
         {
@@ -97,14 +97,14 @@ TEST(YensKSP, DijkstraSmallAcyclicGraph) {
         },
         mg_graph::GraphType::kDirectedGraph
     );
-    yens_alg::Path<> expected_path{
+    shortest_paths::Path<> expected_path{
         {0, 1, 3, 4, 5}, // nodes
         {0, 3, 6, 8},    // edges
         {0.0, 50.0, 90.0, 120.0, 160.0}, // weights
         160.0 // total weight
     };
 
-    auto path = yens_alg::Dijkstra(*G, 0, 5, {}, {});
+    auto path = shortest_paths::Dijkstra(*G, 0, 5, {}, {});
     ASSERT_EQ(path, expected_path);
 }
 
@@ -126,7 +126,7 @@ TEST(YensKSP, DijkstraSmallAcyclicGraph) {
  *   └──50───────►│ 1 ├─────────┘     └──90────────┘
  *                └───┘
  */
-TEST(YensKSP, DijkstraSmallAcyclicGraphParallelEdges) {
+TEST(ShortestPaths, DijkstraSmallAcyclicGraphParallelEdges) {
     auto G = mg_generate::BuildWeightedGraph(
         6,
         {
@@ -142,14 +142,14 @@ TEST(YensKSP, DijkstraSmallAcyclicGraphParallelEdges) {
         mg_graph::GraphType::kDirectedGraph
     );
     // Path should still be the same.
-    yens_alg::Path<> expected_path{
+    shortest_paths::Path<> expected_path{
         {0, 1, 3, 4, 5}, // nodes
         {0, 3, 6, 8},    // edges
         {0.0, 50.0, 90.0, 120.0, 160.0}, // weights
         160.0 // total weight
     };
 
-    auto path = yens_alg::Dijkstra(*G, 0, 5, {}, {});
+    auto path = shortest_paths::Dijkstra(*G, 0, 5, {}, {});
     ASSERT_EQ(path, expected_path);
 }
 
@@ -170,7 +170,7 @@ TEST(YensKSP, DijkstraSmallAcyclicGraphParallelEdges) {
  *   └──50───────►│ 1 ├─────────┘
  *                └───┘
  */
-TEST(YensKSP, DijkstraSmallGraphWithCycle) {
+TEST(ShortestPaths, DijkstraSmallGraphWithCycle) {
     auto G = mg_generate::BuildWeightedGraph(
         6,
         {
@@ -185,14 +185,14 @@ TEST(YensKSP, DijkstraSmallGraphWithCycle) {
         mg_graph::GraphType::kDirectedGraph
     );
     // Path should still be the same.
-    yens_alg::Path<> expected_path{
+    shortest_paths::Path<> expected_path{
         {0, 1, 3, 4, 5}, // nodes
         {0, 3, 6, 8},    // edges
         {0.0, 50.0, 90.0, 120.0, 160.0}, // weights
         160.0 // total weight
     };
 
-    auto path = yens_alg::Dijkstra(*G, 0, 5, {}, {});
+    auto path = shortest_paths::Dijkstra(*G, 0, 5, {}, {});
     ASSERT_EQ(path, expected_path);
 }
 
@@ -213,7 +213,7 @@ TEST(YensKSP, DijkstraSmallGraphWithCycle) {
  *   └──50───────►│ 1 ├─────────┘
  *                └───┘
  */
-TEST(YensKSP, DijkstraSmallGraphWithNegativeCycle) {
+TEST(ShortestPaths, DijkstraSmallGraphWithNegativeCycle) {
     auto G = mg_generate::BuildWeightedGraph(
         6,
         {
@@ -229,14 +229,14 @@ TEST(YensKSP, DijkstraSmallGraphWithNegativeCycle) {
     );
     // The path isn't correct due to the negative edges, but it should at least return
     // something.
-    yens_alg::Path<> expected_path{
+    shortest_paths::Path<> expected_path{
         {0, 1, 3, 4, 5}, // nodes
         {0, 3, 6, 8},    // edges
         {0.0, 50.0, 90.0, 60.0, 100.0}, // weights
         100.0 // total weight
     };
 
-    auto path = yens_alg::Dijkstra(*G, 0, 5, {}, {});
+    auto path = shortest_paths::Dijkstra(*G, 0, 5, {}, {});
     ASSERT_EQ(path, expected_path);
 }
 
@@ -254,7 +254,7 @@ TEST(YensKSP, DijkstraSmallGraphWithNegativeCycle) {
  *   └─────────┤ 2 ├─────────┤ 4 ├─────────┘
  *             └───┘         └───┘
  */
-TEST(YensKSP, DijkstraAllNegativeCycles) {
+TEST(ShortestPaths, DijkstraAllNegativeCycles) {
     // This isn't technically a well-formed graph for Dijstra's, but we just want to
     // make sure it finishes.
     auto G = mg_generate::BuildWeightedGraph(
@@ -269,12 +269,12 @@ TEST(YensKSP, DijkstraAllNegativeCycles) {
         },
         mg_graph::GraphType::kDirectedGraph
     );
-    auto path = yens_alg::Dijkstra(*G, 0, 5, {}, {});
+    auto path = shortest_paths::Dijkstra(*G, 0, 5, {}, {});
     ASSERT_FALSE(path.empty());
     ASSERT_EQ(path.size(), 5);
 }
 
-TEST(YensKSP, DijkstraHugeCyclicGraph) {
+TEST(ShortestPaths, DijkstraHugeCyclicGraph) {
     // Create a graph where each vertex is connected to the next 10 verticies, creating a huge
     // interconnected cycle.
     const uint64_t NUM_VERTICIES = 10'000;
@@ -289,32 +289,32 @@ TEST(YensKSP, DijkstraHugeCyclicGraph) {
     }
 
     // Find a path from 0 to NUM_VERTICIES-1
-    auto path = yens_alg::Dijkstra(*G, 0, NUM_VERTICIES-1, {}, {});
+    auto path = shortest_paths::Dijkstra(*G, 0, NUM_VERTICIES-1, {}, {});
     ASSERT_EQ(path.empty(), false);
     ASSERT_EQ(path.size(), SHORTEST_PATH_EDGES);
     ASSERT_DOUBLE_EQ(path.total_weight, (SHORTEST_PATH_EDGES) * 1.0);
 }
 
-TEST(YensKSP, YensEmptyGraph) {
+TEST(ShortestPaths, YensEmptyGraph) {
     auto G = mg_generate::BuildGraph(0, {});
 
-    auto paths = yens_alg::KShortestPaths(*G, 0, 0, 1, yens_alg::Dijkstra, check_abort_noop);
+    auto paths = shortest_paths::KShortestPaths(*G, 0, 0, 1, shortest_paths::Dijkstra, check_abort_noop);
 
     ASSERT_TRUE(paths.empty());
 }
 
-TEST(YensKSP, YensSingleNode) {
+TEST(ShortestPaths, YensSingleNode) {
     auto G = mg_generate::BuildGraph(1, {});
 
-    auto paths = yens_alg::KShortestPaths(*G, 0, 0, 1, yens_alg::Dijkstra, check_abort_noop);
+    auto paths = shortest_paths::KShortestPaths(*G, 0, 0, 1, shortest_paths::Dijkstra, check_abort_noop);
 
     ASSERT_TRUE(paths.empty());
 }
 
-TEST(YensKSP, YensDisconnectedNodes) {
+TEST(ShortestPaths, YensDisconnectedNodes) {
     auto G = mg_generate::BuildGraph(10, {});
 
-    auto paths = yens_alg::KShortestPaths(*G, 0, 9, 1, yens_alg::Dijkstra, check_abort_noop);
+    auto paths = shortest_paths::KShortestPaths(*G, 0, 9, 1, shortest_paths::Dijkstra, check_abort_noop);
 
     ASSERT_TRUE(paths.empty());
 }
@@ -335,7 +335,7 @@ TEST(YensKSP, YensDisconnectedNodes) {
  *   └──50───────►│ 1 ├─────────┘
  *                └───┘
  */
-TEST(YensKSP, YensSmallAcyclicGraph) {
+TEST(ShortestPaths, YensSmallAcyclicGraph) {
     auto G = mg_generate::BuildWeightedGraph(
         6,
         {
@@ -347,14 +347,14 @@ TEST(YensKSP, YensSmallAcyclicGraph) {
         },
         mg_graph::GraphType::kDirectedGraph
     );
-    std::vector<yens_alg::Path<>> expected_paths = {
+    std::vector<shortest_paths::Path<>> expected_paths = {
         {{0, 1, 3, 4, 5}, {0, 3, 6, 8}, {0.0, 50.0, 90.0, 120.0, 160.0}, 160.0},
         {{0, 2, 3, 4, 5}, {1, 4, 6, 8}, {0.0, 50.0, 90.0, 120.0, 160.0}, 160.0},
         {{0, 3, 4, 5}, {2, 6, 8}, {0.0, 100.0, 130.0, 170.0}, 170.0}
     };
 
     // Find the top 3 best paths
-    auto paths = yens_alg::KShortestPaths(*G, 0, 5, 3, yens_alg::Dijkstra, check_abort_noop);
+    auto paths = shortest_paths::KShortestPaths(*G, 0, 5, 3, shortest_paths::Dijkstra, check_abort_noop);
 
     // Could technically just compare the vectors, but this gives more useful output.
     ASSERT_EQ(paths.size(), expected_paths.size());
@@ -378,7 +378,7 @@ TEST(YensKSP, YensSmallAcyclicGraph) {
  *   └──50───────►│ 1 ├─────────┘     └──90────────┘
  *                └───┘
  */
-TEST(YensKSP, YensSmallAcyclicGraphParallelEdges) {
+TEST(ShortestPaths, YensSmallAcyclicGraphParallelEdges) {
     auto G = mg_generate::BuildWeightedGraph(
         6,
         {
@@ -394,7 +394,7 @@ TEST(YensKSP, YensSmallAcyclicGraphParallelEdges) {
         mg_graph::GraphType::kDirectedGraph
     );
 
-    std::vector<yens_alg::Path<>> expected_paths = {
+    std::vector<shortest_paths::Path<>> expected_paths = {
         /* 0*/ {{0, 1, 3, 4, 5}, {0, 3, 6, 8}, {0.0, 50.0, 90.0, 120.0, 160.0}, 160.0},
         /* 1*/ {{0, 2, 3, 4, 5}, {1, 4, 6, 8}, {0.0, 50.0, 90.0, 120.0, 160.0}, 160.0},
         /* 2*/ {{0, 1, 3, 5}, {0, 3, 7}, {0.0, 50.0, 90.0, 170.0}, 170.0},
@@ -413,7 +413,7 @@ TEST(YensKSP, YensSmallAcyclicGraphParallelEdges) {
     };
 
     // Set K really high so we find all the paths
-    auto paths = yens_alg::KShortestPaths(*G, 0, 5, 100, yens_alg::Dijkstra, check_abort_noop);
+    auto paths = shortest_paths::KShortestPaths(*G, 0, 5, 100, shortest_paths::Dijkstra, check_abort_noop);
     ASSERT_EQ(paths.size(), expected_paths.size());
     ASSERT_TRUE(CheckPaths(paths, expected_paths));
 }
@@ -435,7 +435,7 @@ TEST(YensKSP, YensSmallAcyclicGraphParallelEdges) {
  *   └──50───────►│ 1 ├─────────┘
  *                └───┘
  */
-TEST(YensKSP, YensSmallGraphWithCycle) {
+TEST(ShortestPaths, YensSmallGraphWithCycle) {
     auto G = mg_generate::BuildWeightedGraph(
         6,
         {
@@ -451,7 +451,7 @@ TEST(YensKSP, YensSmallGraphWithCycle) {
     );
 
     // Should add no new paths over version without the cycle
-    std::vector<yens_alg::Path<>> expected_paths = {
+    std::vector<shortest_paths::Path<>> expected_paths = {
         /* 0*/ {{0, 1, 3, 4, 5}, {0, 3, 6, 8}, {0.0, 50.0, 90.0, 120.0, 160.0}, 160.0},
         /* 1*/ {{0, 2, 3, 4, 5}, {1, 4, 6, 8}, {0.0, 50.0, 90.0, 120.0, 160.0}, 160.0},
         /* 2*/ {{0, 1, 3, 5}, {0, 3, 7}, {0.0, 50.0, 90.0, 170.0}, 170.0},
@@ -462,13 +462,13 @@ TEST(YensKSP, YensSmallGraphWithCycle) {
     };
 
     // Set K really high so we find all the paths
-    auto paths = yens_alg::KShortestPaths(*G, 0, 5, 100, yens_alg::Dijkstra, check_abort_noop);
+    auto paths = shortest_paths::KShortestPaths(*G, 0, 5, 100, shortest_paths::Dijkstra, check_abort_noop);
     ASSERT_EQ(paths.size(), expected_paths.size());
     ASSERT_TRUE(CheckPaths(paths, expected_paths));
 }
 
 // Subset of a real graph
-TEST(YensKSP, YensComplexGraph) {
+TEST(ShortestPaths, YensComplexGraph) {
     auto G = mg_generate::BuildWeightedGraph(
         21,
         {
@@ -497,7 +497,7 @@ TEST(YensKSP, YensComplexGraph) {
     const uint64_t K = 100;
 
     // Should be more than 30 paths
-    auto paths = yens_alg::KShortestPaths(*G, 0, 1, K, yens_alg::Dijkstra, check_abort_noop);
+    auto paths = shortest_paths::KShortestPaths(*G, 0, 1, K, shortest_paths::Dijkstra, check_abort_noop);
     ASSERT_EQ(paths.size(), K);
     double prev_weight = -std::numeric_limits<double>::infinity();
     for (size_t i = 0; i < paths.size(); i++) {

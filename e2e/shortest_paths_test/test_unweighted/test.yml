@@ -1,6 +1,6 @@
 query: >-
     MATCH (source:Node {id: 0}), (target:Node {id: 5})
-    CALL yens_ksp.k_shortest_paths(source, target, 100)
+    CALL shortest_paths.k_shortest_paths(source, target, 100)
     YIELD
       index,
       source_node,

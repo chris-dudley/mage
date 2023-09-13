@@ -160,6 +160,6 @@ add_subdirectory(refactor_module)
 add_subdirectory(merge_module)
 add_subdirectory(csv_utils_module)
 add_subdirectory(algo_module)
+add_subdirectory(shortest_paths_module)
 
 add_cugraph_subdirectory(cugraph_module)
-add_subdirectory(yens_ksp_module)
