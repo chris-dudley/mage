@@ -286,7 +286,7 @@ YIELD node, rank;
 | [uuid_generator](https://memgraph.com/docs/mage/query-modules/cpp/uuid-generator)                                | C++    | A module that generates a new universally unique identifier (UUID).                                                                                                                                                               |
 | [vrp](https://memgraph.com/docs/mage/query-modules/python/vrp)                                                   | Python | An algorithm for finding the shortest route possible between the central depot and places to be visited. The algorithm can be solved with multiple vehicles that represent a visiting fleet.                                      |
 | [weakly_connected_components](https://memgraph.com/docs/mage/query-modules/cpp/weakly-connected-components)      | C++    | A module that finds weakly connected components in a graph.                                                                                                                                                                       |
-| [yens_ksp](https://memgraph.com/docs/mage/query-modules/cpp/yens-ksp)]                                           | C++    | A module that implmenets Yen's algorithm for finding the K-shortest paths between two nodes in a graph.                                                                                  |
+| [shortest_paths](https://memgraph.com/docs/mage/query-modules/cpp/yens-ksp)]                                           | C++    | A module that implmenets Yen's algorithm for finding the K-shortest paths between two nodes in a graph.                                                                                  |
 
 ## Advanced configuration
 

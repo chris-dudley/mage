@@ -5,7 +5,7 @@
 
 #include <mg_graph.hpp>
 
-namespace yens_alg {
+namespace shortest_paths {
 
 /// @brief Contains information about a specific path through the graph.
 /// @tparam TSize Integer type used as IDs for nodes and edges.
@@ -233,4 +233,4 @@ bool Path<TSize>::is_prefix(const Path<TSize>& other) const noexcept {
     return other.has_prefix(*this);
 }
 
-} // namespace yens_alg
+} // namespace shortest_paths

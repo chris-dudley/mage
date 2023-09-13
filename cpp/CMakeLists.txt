@@ -156,6 +156,6 @@ add_subdirectory(text_module)
 add_subdirectory(path_module)
 add_subdirectory(node_module)
 add_subdirectory(neighbors_module)
+add_subdirectory(shortest_paths_module)
 
 add_cugraph_subdirectory(cugraph_module)
-add_subdirectory(yens_ksp_module)

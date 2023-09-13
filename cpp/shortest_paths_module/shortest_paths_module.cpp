@@ -61,7 +61,7 @@ void YensKShortestPaths(mgp_list *args, mgp_graph *memgraph_graph, mgp_result *r
             return;
         }
 
-        yens_alg::ShortestPathFunc sp_func = yens_alg::Dijkstra;
+        shortest_paths::ShortestPathFunc sp_func = shortest_paths::Dijkstra;
 
         auto graph_view_ptr = subgraph ?
             mg_utility::GetSubgraphView(
@@ -81,7 +81,7 @@ void YensKShortestPaths(mgp_list *args, mgp_graph *memgraph_graph, mgp_result *r
         const auto sink_id = GetInnerNodeId(graph_view, sink_mgid);
 
         auto abort_func = [&graph] () { graph.CheckMustAbort(); };
-        const auto paths = yens_alg::KShortestPaths(graph_view, source_id, sink_id, K, sp_func, abort_func);
+        const auto paths = shortest_paths::KShortestPaths(graph_view, source_id, sink_id, K, sp_func, abort_func);
 
         for (std::size_t path_index = 0; path_index < paths.size(); path_index++) {
             const auto& path = paths[path_index];
@@ -127,12 +127,12 @@ void YensKShortestPaths(mgp_list *args, mgp_graph *memgraph_graph, mgp_result *r
             }
 
             auto record = record_factory.NewRecord();
-            record.Insert(std::string(yens_alg::kReturnIndex).c_str(), int64_t(path_index));
-            record.Insert(std::string(yens_alg::kReturnSourceNode).c_str(), source_node);
-            record.Insert(std::string(yens_alg::kReturnTargetNode).c_str(), sink_node);
-            record.Insert(std::string(yens_alg::kReturnTotalCost).c_str(), path.total_weight);
-            record.Insert(std::string(yens_alg::kReturnCosts).c_str(), costs);
-            record.Insert(std::string(yens_alg::kReturnPath).c_str(), result_path);
+            record.Insert(std::string(shortest_paths::kReturnIndex).c_str(), int64_t(path_index));
+            record.Insert(std::string(shortest_paths::kReturnSourceNode).c_str(), source_node);
+            record.Insert(std::string(shortest_paths::kReturnTargetNode).c_str(), sink_node);
+            record.Insert(std::string(shortest_paths::kReturnTotalCost).c_str(), path.total_weight);
+            record.Insert(std::string(shortest_paths::kReturnCosts).c_str(), costs);
+            record.Insert(std::string(shortest_paths::kReturnPath).c_str(), result_path);
         }
     } catch (const std::exception& e) {
         record_factory.SetErrorMessage(e.what());
@@ -161,43 +161,43 @@ extern "C" int mgp_init_module(struct mgp_module *module, struct mgp_memory *mem
         auto subgraph_edges_type = std::make_pair(mgp::Type::List, mgp::Type::Relationship);
 
         mgp::AddProcedure(
-            YensGraph, yens_alg::kProcedureKShortestPaths, mgp::ProcedureType::Read,
+            YensGraph, shortest_paths::kProcedureKShortestPaths, mgp::ProcedureType::Read,
             {
-                mgp::Parameter(yens_alg::kArgumentSourceNode, mgp::Type::Node),
-                mgp::Parameter(yens_alg::kArgumentTargetNode, mgp::Type::Node),
-                mgp::Parameter(yens_alg::kArgumentK, mgp::Type::Int, 1L),
-                mgp::Parameter(yens_alg::kArgumentRelationshipWeightProperty, mgp::Type::String, ""),
-                mgp::Parameter(yens_alg::kArgumentDefaultWeight, mgp::Type::Double, 1.0),
+                mgp::Parameter(shortest_paths::kArgumentSourceNode, mgp::Type::Node),
+                mgp::Parameter(shortest_paths::kArgumentTargetNode, mgp::Type::Node),
+                mgp::Parameter(shortest_paths::kArgumentK, mgp::Type::Int, 1L),
+                mgp::Parameter(shortest_paths::kArgumentRelationshipWeightProperty, mgp::Type::String, ""),
+                mgp::Parameter(shortest_paths::kArgumentDefaultWeight, mgp::Type::Double, 1.0),
             },
             {
-                mgp::Return(yens_alg::kReturnIndex, mgp::Type::Int),
-                mgp::Return(yens_alg::kReturnSourceNode, mgp::Type::Node),
-                mgp::Return(yens_alg::kReturnTargetNode, mgp::Type::Node),
-                mgp::Return(yens_alg::kReturnTotalCost, mgp::Type::Double),
-                mgp::Return(yens_alg::kReturnCosts, return_costs_type),
-                mgp::Return(yens_alg::kReturnPath, mgp::Type::Path)
+                mgp::Return(shortest_paths::kReturnIndex, mgp::Type::Int),
+                mgp::Return(shortest_paths::kReturnSourceNode, mgp::Type::Node),
+                mgp::Return(shortest_paths::kReturnTargetNode, mgp::Type::Node),
+                mgp::Return(shortest_paths::kReturnTotalCost, mgp::Type::Double),
+                mgp::Return(shortest_paths::kReturnCosts, return_costs_type),
+                mgp::Return(shortest_paths::kReturnPath, mgp::Type::Path)
             },
             module, memory
         );
 
         mgp::AddProcedure(
-            YensSubgraph, yens_alg::kProcedureSubgraphKShortestPaths, mgp::ProcedureType::Read,
+            YensSubgraph, shortest_paths::kProcedureSubgraphKShortestPaths, mgp::ProcedureType::Read,
             {
-                mgp::Parameter(yens_alg::kArgumentSubgraphNodes, subgraph_nodes_type),
-                mgp::Parameter(yens_alg::kArgumentSubgraphEdges, subgraph_edges_type),
-                mgp::Parameter(yens_alg::kArgumentSourceNode, mgp::Type::Node),
-                mgp::Parameter(yens_alg::kArgumentTargetNode, mgp::Type::Node),
-                mgp::Parameter(yens_alg::kArgumentK, mgp::Type::Int, 1L),
-                mgp::Parameter(yens_alg::kArgumentRelationshipWeightProperty, mgp::Type::String, ""),
-                mgp::Parameter(yens_alg::kArgumentDefaultWeight, mgp::Type::Double, 1.0),
+                mgp::Parameter(shortest_paths::kArgumentSubgraphNodes, subgraph_nodes_type),
+                mgp::Parameter(shortest_paths::kArgumentSubgraphEdges, subgraph_edges_type),
+                mgp::Parameter(shortest_paths::kArgumentSourceNode, mgp::Type::Node),
+                mgp::Parameter(shortest_paths::kArgumentTargetNode, mgp::Type::Node),
+                mgp::Parameter(shortest_paths::kArgumentK, mgp::Type::Int, 1L),
+                mgp::Parameter(shortest_paths::kArgumentRelationshipWeightProperty, mgp::Type::String, ""),
+                mgp::Parameter(shortest_paths::kArgumentDefaultWeight, mgp::Type::Double, 1.0),
             },
             {
-                mgp::Return(yens_alg::kReturnIndex, mgp::Type::Int),
-                mgp::Return(yens_alg::kReturnSourceNode, mgp::Type::Node),
-                mgp::Return(yens_alg::kReturnTargetNode, mgp::Type::Node),
-                mgp::Return(yens_alg::kReturnTotalCost, mgp::Type::Double),
-                mgp::Return(yens_alg::kReturnCosts, return_costs_type),
-                mgp::Return(yens_alg::kReturnPath, mgp::Type::Path)
+                mgp::Return(shortest_paths::kReturnIndex, mgp::Type::Int),
+                mgp::Return(shortest_paths::kReturnSourceNode, mgp::Type::Node),
+                mgp::Return(shortest_paths::kReturnTargetNode, mgp::Type::Node),
+                mgp::Return(shortest_paths::kReturnTotalCost, mgp::Type::Double),
+                mgp::Return(shortest_paths::kReturnCosts, return_costs_type),
+                mgp::Return(shortest_paths::kReturnPath, mgp::Type::Path)
             },
             module, memory
         );

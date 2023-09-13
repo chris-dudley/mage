@@ -8,7 +8,7 @@
 
 #include "path.hpp"
 
-namespace yens_alg {
+namespace shortest_paths {
 
 // Types used by helper functions
 
@@ -38,4 +38,4 @@ Path<> Dijkstra(
     const EdgeIdSet& ignored_edges, const NodeIdSet& ignored_nodes
 );
 
-} // namespace yens_alg
+} // namespace shortest_paths

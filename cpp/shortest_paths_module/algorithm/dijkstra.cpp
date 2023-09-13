@@ -7,7 +7,7 @@
 #include <unordered_map>
 #include <stdexcept>
 
-namespace yens_alg {
+namespace shortest_paths {
 
 using std::uint64_t;
 
@@ -107,4 +107,4 @@ Path<> Dijkstra(
     return result;
 }
 
-} // namespace yens_alg
+} // namespace shortest_paths
