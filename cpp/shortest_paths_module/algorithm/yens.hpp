@@ -1,30 +1,10 @@
 #pragma once
 
-#include <string_view>
 #include <functional>
 
 #include "shortest_path.hpp"
 
 namespace shortest_paths {
-
-/* k_shortest_paths constants */
-constexpr const std::string_view kProcedureKShortestPaths = "k_shortest_paths";
-constexpr const std::string_view kProcedureSubgraphKShortestPaths = "subgraph_k_shortest_paths";
-
-constexpr const std::string_view kArgumentSubgraphNodes = "subgraph_nodes";
-constexpr const std::string_view kArgumentSubgraphEdges = "subgraph_edges";
-constexpr const std::string_view kArgumentSourceNode = "source_node";
-constexpr const std::string_view kArgumentTargetNode = "target_node";
-constexpr const std::string_view kArgumentK = "k";
-constexpr const std::string_view kArgumentRelationshipWeightProperty = "relationship_weight_property";
-constexpr const std::string_view kArgumentDefaultWeight = "default_weight";
-
-constexpr const std::string_view kReturnIndex = "index";
-constexpr const std::string_view kReturnSourceNode = "source_node";
-constexpr const std::string_view kReturnTargetNode = "target_node";
-constexpr const std::string_view kReturnTotalCost = "total_cost";
-constexpr const std::string_view kReturnCosts = "costs";
-constexpr const std::string_view kReturnPath = "path";
 
 /// @brief Signature of a function used to check if the execution should be aborted.
 ///     The function is expected to throw an exception if the execution should be aborted,

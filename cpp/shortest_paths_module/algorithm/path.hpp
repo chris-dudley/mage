@@ -12,24 +12,24 @@ namespace shortest_paths {
 template <typename TSize = std::uint64_t>
 struct Path {
     Path() = delete;
-    /// @brief Constructs an empty path from a source with no edges, or weights.
-    Path(TSize source): nodes({source}), edges(), weights({0.0}), total_weight(0.0) {};
+    /// @brief Constructs an empty path from a source with no edges, or costs.
+    Path(TSize source): nodes({source}), edges(), costs({0.0}), total_cost(0.0) {};
     /// @brief Contructs a Path from its components by copying. No validation is done on the inputs.
     /// @param nodes List of nodes in the path.
     /// @param edges List of edges taken along the path.
-    /// @param weights Cummulative costs at each node along the path.
-    /// @param total_weight Total cost of the path.
-    Path(const std::vector<TSize>& nodes, const std::vector<TSize>& edges, const std::vector<double>& weights, double total_weight):
-        nodes(nodes), edges(edges), weights(weights), total_weight(total_weight)
+    /// @param costs Cummulative costs at each node along the path.
+    /// @param total_cost Total cost of the path.
+    Path(const std::vector<TSize>& nodes, const std::vector<TSize>& edges, const std::vector<double>& costs, double total_cost):
+        nodes(nodes), edges(edges), costs(costs), total_cost(total_cost)
         {};
     /// @brief Contructs a Path from its components by moving them. No validation is done on the inputs.
     /// @param nodes List of nodes in the path.
     /// @param edges List of edges taken along the path.
-    /// @param weights Cummulative costs at each node along the path.
-    /// @param total_weight Total cost of the path.
-    Path(std::vector<TSize>&& nodes, std::vector<TSize>&& edges, std::vector<double>&& weights, double total_weight):
+    /// @param costs Cummulative costs at each node along the path.
+    /// @param total_cost Total cost of the path.
+    Path(std::vector<TSize>&& nodes, std::vector<TSize>&& edges, std::vector<double>&& costs, double total_cost):
         nodes(std::move(nodes)), edges(std::move(edges)),
-        weights(std::move(weights)), total_weight(total_weight)
+        costs(std::move(costs)), total_cost(total_cost)
         {};
 
     Path(const Path<TSize>&) = default;
@@ -42,10 +42,10 @@ struct Path {
     std::vector<TSize> nodes;
     /// @brief IDs of edges traversed from node i to i+1
     std::vector<TSize> edges;
-    /// @brief Accumulated weight at node i
-    std::vector<double> weights;
-    /// @brief Total weight of the path
-    double total_weight;
+    /// @brief Accumulated cost at node i
+    std::vector<double> costs;
+    /// @brief Total cost of the path
+    double total_cost;
 
     /// @brief Returns true if the path contains no edges.
     /// @return True if the path contains no edges, false otherwise.
@@ -126,8 +126,8 @@ void Path<TSize>::add_edge(const mg_graph::Edge<TSize>& edge, double cummulative
     }
     nodes.push_back(edge.to);
     edges.push_back(edge.id);
-    weights.push_back(cummulative_weight);
-    total_weight = cummulative_weight;
+    costs.push_back(cummulative_weight);
+    total_cost = cummulative_weight;
 }
 
 template <typename TSize>
@@ -137,8 +137,8 @@ void Path<TSize>::add_edge(TSize id, TSize from, TSize to, double cummulative_we
     }
     nodes.push_back(to);
     edges.push_back(id);
-    weights.push_back(cummulative_weight);
-    total_weight = cummulative_weight;
+    costs.push_back(cummulative_weight);
+    total_cost = cummulative_weight;
 }
 
 
@@ -158,9 +158,9 @@ Path<TSize> Path<TSize>::prefix(TSize length) const {
     for (TSize i = 0; i < length; i++) {
         result.edges.push_back(edges[i]);
         result.nodes.push_back(nodes[i+1]);
-        result.weights.push_back(weights[i+1]);
+        result.costs.push_back(costs[i+1]);
     }
-    result.total_weight = result.weights[length];
+    result.total_cost = result.costs[length];
 
     return result;
 }
@@ -170,8 +170,8 @@ void Path<TSize>::extend(const Path<TSize>& other) {
     if (empty()) {
         nodes = other.nodes;
         edges = other.edges;
-        weights = other.weights;
-        total_weight = other.total_weight;
+        costs = other.costs;
+        total_cost = other.total_cost;
         return;
     }
 
@@ -180,10 +180,10 @@ void Path<TSize>::extend(const Path<TSize>& other) {
     }
     for (size_t i = 1; i < other.nodes.size(); i++) {
         nodes.push_back(other.nodes[i]);
-        weights.push_back(other.weights[i] + total_weight);
+        costs.push_back(other.costs[i] + total_cost);
     }
     edges.insert(edges.end(), other.edges.cbegin(), other.edges.cend());
-    total_weight += other.total_weight;
+    total_cost += other.total_cost;
 }
 
 template <typename TSize>
