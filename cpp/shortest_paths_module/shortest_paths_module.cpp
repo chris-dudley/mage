@@ -6,6 +6,8 @@
 
 #include "algorithm/shortest_path.hpp"
 #include "algorithm/yens.hpp"
+#include "algorithm/procedures.hpp"
+#include "algorithm/bellman_ford.hpp"
 
 namespace {
 
@@ -26,6 +28,48 @@ uint64_t GetMemgraphNodeId(const mg_graph::GraphView<>& graph, uint64_t inner_id
 }
 uint64_t GetMemgraphEdgeId(const mg_graph::GraphView<>& graph, uint64_t inner_id) {
     return graph.GetMemgraphEdgeId(inner_id);
+}
+
+mgp::Path TranslatePath(const mgp::Graph& graph, const mg_graph::GraphView<>& graph_view, const shortest_paths::Path<>& path) {
+    auto source_mgid = mgp::Id::FromUint(GetMemgraphNodeId(graph_view, path.nodes[0]));
+    mgp::Node source_node = graph.GetNodeById(source_mgid);
+    mgp::Path result_path(source_node);
+
+    mgp::Node current_node = source_node;
+    for (size_t edge_index = 0; edge_index < path.size(); edge_index++) {
+        auto from_node_mgid = GetMemgraphNodeId(graph_view, path.nodes[edge_index]);
+        auto to_node_mgid = GetMemgraphNodeId(graph_view, path.nodes[edge_index+1]);
+        auto edge_mgid = GetMemgraphEdgeId(graph_view, path.edges[edge_index]);
+
+        if (from_node_mgid != current_node.Id().AsUint()) {
+            throw std::logic_error("From node in edge does not match current node!");
+        }
+
+        bool found_edge = false;
+        // Search for the matching edge since there's no easy way of pulling out a specific
+        // edge from the graph by ID.
+        for (const auto& relationship : current_node.OutRelationships()) {
+            if (relationship.Id().AsUint() != edge_mgid) {
+                continue;
+            }
+            auto next_node = relationship.To();
+            if (next_node.Id().AsUint() != to_node_mgid) {
+                throw std::logic_error("To node in edge does not match to node in relationship!");
+            }
+
+            found_edge = true;
+
+            result_path.Expand(relationship);
+            current_node = next_node;
+            break;
+        }
+
+        if (!found_edge) {
+            throw std::logic_error("Unable to find matching out relationship");
+        }
+    }
+
+    return result_path;
 }
 
 void YensKShortestPaths(mgp_list *args, mgp_graph *memgraph_graph, mgp_result *result, mgp_memory *memory, bool subgraph) {
@@ -86,43 +130,10 @@ void YensKShortestPaths(mgp_list *args, mgp_graph *memgraph_graph, mgp_result *r
         for (std::size_t path_index = 0; path_index < paths.size(); path_index++) {
             const auto& path = paths[path_index];
 
-            mgp::Path result_path(source_node);
+            mgp::Path result_path = TranslatePath(graph, graph_view, path);
             mgp::Node current_node = source_node;
-            mgp::List costs(path.weights.size()); // accumulated cost at each node
-
-            for (size_t edge_index = 0; edge_index < path.size(); edge_index++) {
-                auto from_node_mgid = GetMemgraphNodeId(graph_view, path.nodes[edge_index]);
-                auto to_node_mgid = GetMemgraphNodeId(graph_view, path.nodes[edge_index+1]);
-                auto edge_mgid = GetMemgraphEdgeId(graph_view, path.edges[edge_index]);
-
-                if (from_node_mgid != current_node.Id().AsUint()) {
-                    throw std::logic_error("From node in edge does not match current node!");
-                }
-
-                bool found_edge = false;
-                // Search for the matching edge since there's no easy way of pulling out a specific
-                // edge from the graph by ID.
-                for (const auto& relationship : current_node.OutRelationships()) {
-                    if (relationship.Id().AsUint() != edge_mgid) {
-                        continue;
-                    }
-                    auto next_node = relationship.To();
-                    if (next_node.Id().AsUint() != to_node_mgid) {
-                        throw std::logic_error("To node in edge does not match to node in relationship!");
-                    }
-
-                    found_edge = true;
-
-                    result_path.Expand(relationship);
-                    current_node = next_node;
-                    break;
-                }
-
-                if (!found_edge) {
-                    throw std::logic_error("Unable to find matching out relationship");
-                }
-            }
-            for (auto cost : path.weights) {
+            mgp::List costs(path.costs.size()); // accumulated cost at each node
+            for (auto cost : path.costs) {
                 costs.Append(mgp::Value(cost));
             }
 
@@ -130,7 +141,7 @@ void YensKShortestPaths(mgp_list *args, mgp_graph *memgraph_graph, mgp_result *r
             record.Insert(std::string(shortest_paths::kReturnIndex).c_str(), int64_t(path_index));
             record.Insert(std::string(shortest_paths::kReturnSourceNode).c_str(), source_node);
             record.Insert(std::string(shortest_paths::kReturnTargetNode).c_str(), sink_node);
-            record.Insert(std::string(shortest_paths::kReturnTotalCost).c_str(), path.total_weight);
+            record.Insert(std::string(shortest_paths::kReturnTotalCost).c_str(), path.total_cost);
             record.Insert(std::string(shortest_paths::kReturnCosts).c_str(), costs);
             record.Insert(std::string(shortest_paths::kReturnPath).c_str(), result_path);
         }
@@ -149,6 +160,97 @@ void YensSubgraph(mgp_list *args, mgp_graph *memgraph_graph, mgp_result *result,
     YensKShortestPaths(args, memgraph_graph, result, memory, true);
 }
 
+void BellmanFordProcedure(mgp_list *args, mgp_graph *memgraph_graph, mgp_result *result, mgp_memory *memory) {
+    mgp::MemoryDispatcherGuard mem_guard(memory);
+    mgp::Graph graph{memgraph_graph};
+
+    const auto arguments = mgp::List(args);
+    const auto record_factory = mgp::RecordFactory(result);
+    try {
+        mgp::List target_nodes;
+
+        const auto source_node = arguments[0].ValueNode();
+        if (!arguments[1].IsNull()) target_nodes = arguments[1].ValueList();
+        const auto weight_property = arguments[3].ValueString();
+        const auto default_weight = arguments[4].ValueDouble();
+
+        bool weighted = ! weight_property.empty();
+        const char * weight_prop_cstr = weighted ? weight_property.data() : nullptr;
+
+        auto graph_view_ptr = mg_utility::GetGraphView(
+            memgraph_graph, result, memory, mg_graph::GraphType::kDirectedGraph,
+            weighted, weight_prop_cstr, default_weight
+        );
+
+        const mg_graph::GraphView<>& graph_view = *graph_view_ptr;
+
+        const auto source_mgid = source_node.Id().AsUint();
+        const auto source_id = GetInnerNodeId(graph_view, source_mgid);
+
+        shortest_paths::BellmanFordPathfinder<uint64_t> pathfinder(graph_view, source_id);
+        if (pathfinder.has_negative_cycle()) {
+            auto cycle = pathfinder.negative_cycle().value();
+            mgp::Path result_path = TranslatePath(graph, graph_view, cycle);
+            mgp::Node cycle_source = result_path.GetNodeAt(0);
+            mgp::List costs(cycle.costs.size()); // accumulated cost at each node
+            for (auto cost : cycle.costs) {
+                costs.Append(mgp::Value(cost));
+            }
+
+            auto record = record_factory.NewRecord();
+            record.Insert(std::string(shortest_paths::kReturnNegativeCycle).c_str(), true);
+            record.Insert(std::string(shortest_paths::kReturnSourceNode).c_str(), cycle_source);
+            record.Insert(std::string(shortest_paths::kReturnTargetNode).c_str(), cycle_source);
+            record.Insert(std::string(shortest_paths::kReturnTotalCost).c_str(), cycle.total_cost);
+            record.Insert(std::string(shortest_paths::kReturnCosts).c_str(), costs);
+            record.Insert(std::string(shortest_paths::kReturnPath).c_str(), result_path);
+            return;
+        }
+
+        std::vector<uint64_t> targets;
+        if (target_nodes.Empty()) {
+            // If no targets specified, return paths to all reachable nodes
+            for (auto node : graph_view.Nodes()) {
+                if (node.id != source_id && pathfinder.has_path_to(node.id)) {
+                    targets.push_back(node.id);
+                }
+            }
+        } else {
+            for (auto target_nodes_elem : target_nodes ) {
+                auto target_node = target_nodes_elem.ValueNode();
+                auto node_id = GetInnerNodeId(graph_view, target_node.Id().AsUint());
+                if (pathfinder.has_path_to(node_id)) {
+                    targets.push_back(node_id);
+                }
+            }
+        }
+
+        for (auto target_id : targets) {
+            auto target_mgid = GetMemgraphNodeId(graph_view, target_id);
+            mgp::Node target_node = graph.GetNodeById(mgp::Id::FromUint(target_mgid));
+
+            auto path = pathfinder.path_to(target_id);
+            if (path.empty()) continue;
+
+            mgp::Path result_path = TranslatePath(graph, graph_view, path);
+            mgp::List costs(path.costs.size()); // accumulated cost at each node
+            for (auto cost : path.costs) {
+                costs.Append(mgp::Value(cost));
+            }
+
+            auto record = record_factory.NewRecord();
+            record.Insert(std::string(shortest_paths::kReturnNegativeCycle).c_str(), false);
+            record.Insert(std::string(shortest_paths::kReturnSourceNode).c_str(), source_node);
+            record.Insert(std::string(shortest_paths::kReturnTargetNode).c_str(), target_node);
+            record.Insert(std::string(shortest_paths::kReturnTotalCost).c_str(), path.total_cost);
+            record.Insert(std::string(shortest_paths::kReturnCosts).c_str(), costs);
+            record.Insert(std::string(shortest_paths::kReturnPath).c_str(), result_path);
+        }
+    } catch (const std::exception& e) {
+        record_factory.SetErrorMessage(e.what());
+        return;
+    }
+}
 
 } // namespace
 
@@ -159,9 +261,10 @@ extern "C" int mgp_init_module(struct mgp_module *module, struct mgp_memory *mem
         auto return_costs_type = std::make_pair(mgp::Type::List, mgp::Type::Double);
         auto subgraph_nodes_type = std::make_pair(mgp::Type::List, mgp::Type::Node);
         auto subgraph_edges_type = std::make_pair(mgp::Type::List, mgp::Type::Relationship);
+        mgp::Value empty_list(mgp::List{});
 
         mgp::AddProcedure(
-            YensGraph, shortest_paths::kProcedureKShortestPaths, mgp::ProcedureType::Read,
+            YensGraph, shortest_paths::kProcedureYens, mgp::ProcedureType::Read,
             {
                 mgp::Parameter(shortest_paths::kArgumentSourceNode, mgp::Type::Node),
                 mgp::Parameter(shortest_paths::kArgumentTargetNode, mgp::Type::Node),
@@ -181,7 +284,7 @@ extern "C" int mgp_init_module(struct mgp_module *module, struct mgp_memory *mem
         );
 
         mgp::AddProcedure(
-            YensSubgraph, shortest_paths::kProcedureSubgraphKShortestPaths, mgp::ProcedureType::Read,
+            YensSubgraph, shortest_paths::kProcedureYensSubgraph, mgp::ProcedureType::Read,
             {
                 mgp::Parameter(shortest_paths::kArgumentSubgraphNodes, subgraph_nodes_type),
                 mgp::Parameter(shortest_paths::kArgumentSubgraphEdges, subgraph_edges_type),
@@ -202,6 +305,24 @@ extern "C" int mgp_init_module(struct mgp_module *module, struct mgp_memory *mem
             module, memory
         );
 
+        mgp::AddProcedure(
+            BellmanFordProcedure, shortest_paths::kProcedureBellmanFord, mgp::ProcedureType::Read,
+            {
+                mgp::Parameter(shortest_paths::kArgumentSourceNode, mgp::Type::Node),
+                mgp::Parameter(shortest_paths::kArgumentTargetNodes, {mgp::Type::List, mgp::Type::Node}, empty_list),
+                mgp::Parameter(shortest_paths::kArgumentRelationshipWeightProperty, mgp::Type::String, ""),
+                mgp::Parameter(shortest_paths::kArgumentDefaultWeight, mgp::Type::Double, 1.0),
+            },
+            {
+                mgp::Return(shortest_paths::kReturnNegativeCycle, mgp::Type::Bool),
+                mgp::Return(shortest_paths::kReturnSourceNode, mgp::Type::Node),
+                mgp::Return(shortest_paths::kReturnTargetNode, mgp::Type::Node),
+                mgp::Return(shortest_paths::kReturnTotalCost, mgp::Type::Double),
+                mgp::Return(shortest_paths::kReturnCosts, return_costs_type),
+                mgp::Return(shortest_paths::kReturnPath, mgp::Type::Path)
+            },
+            module, memory
+        );
     } catch (const std::exception& e) {
         return 1;
     }

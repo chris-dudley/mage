@@ -6,8 +6,8 @@
 
 namespace shortest_paths {
 
-bool greater_weight( const Path<>& lhs, const Path<>& rhs ) {
-    return lhs.total_weight > rhs.total_weight;
+bool greater_cost( const Path<>& lhs, const Path<>& rhs ) {
+    return lhs.total_cost > rhs.total_cost;
 }
 
 // Check if our path heap contains the given path.
@@ -21,11 +21,11 @@ bool contains_path( const std::vector<Path<>>& paths, const Path<>& to_find ) {
     return false;
 }
 
-// Returns the indicies of paths in `paths` that have `total_weight == target_weight`, up to `limit` entries.
-std::vector<size_t> find_same_weight_paths(const std::vector<Path<>>& paths, double target_weight, uint64_t limit) {
+// Returns the indicies of paths in `paths` that have `total_cost == target_cost`, up to `limit` entries.
+std::vector<size_t> find_same_cost_paths(const std::vector<Path<>>& paths, double target_cost, uint64_t limit) {
     std::vector<size_t> result;
     for (size_t i = 0; i < paths.size() && result.size() < limit; i++) {
-        if (paths[i].total_weight == target_weight) {
+        if (paths[i].total_cost == target_cost) {
             result.push_back(i);
         }
     }
@@ -68,9 +68,9 @@ std::vector<Path<>> KShortestPaths(
         // in `possible_paths`. If so, we will not find any shorter paths than that, so just add those
         // to the result and return.
         if (possible_paths.size() >= paths_still_needed) {
-            auto same_weight_path_indicies = find_same_weight_paths(possible_paths, prev_shortest.total_weight, paths_still_needed);
-            if (same_weight_path_indicies.size() == paths_still_needed) {
-                for (size_t i = 0; i < same_weight_path_indicies.size(); i++) {
+            auto same_cost_path_indicies = find_same_cost_paths(possible_paths, prev_shortest.total_cost, paths_still_needed);
+            if (same_cost_path_indicies.size() == paths_still_needed) {
+                for (size_t i = 0; i < same_cost_path_indicies.size(); i++) {
                     result.push_back(std::move(possible_paths[i]));
                 }
                 return result;
@@ -150,7 +150,7 @@ std::vector<Path<>> KShortestPaths(
                 // If total_path is not in possible_paths, add it to the heap
                 if (!contains_path(possible_paths, total_path)) {
                     possible_paths.push_back(total_path);
-                    std::push_heap(possible_paths.begin(), possible_paths.end(), greater_weight);
+                    std::push_heap(possible_paths.begin(), possible_paths.end(), greater_cost);
                 }
             }
         }
@@ -161,7 +161,7 @@ std::vector<Path<>> KShortestPaths(
         }
 
         // Pop the minimum weighted path from the heap and add it to the result
-        std::pop_heap(possible_paths.begin(), possible_paths.end(), greater_weight);
+        std::pop_heap(possible_paths.begin(), possible_paths.end(), greater_cost);
         result.push_back(std::move(possible_paths.back()));
         possible_paths.pop_back();
     }

@@ -7,18 +7,19 @@
 
 #include "algorithm/shortest_path.hpp"
 #include "algorithm/yens.hpp"
+#include "algorithm/bellman_ford.hpp"
 
 void check_abort_noop() {}
 
 bool CheckPaths(const std::vector<shortest_paths::Path<>>& paths, const std::vector<shortest_paths::Path<>>& expected) {
     std::multimap<double, size_t> cost_to_path_index;
     for (size_t i = 0; i < expected.size(); i++) {
-        cost_to_path_index.emplace(expected[i].total_weight, i);
+        cost_to_path_index.emplace(expected[i].total_cost, i);
     }
 
     // Paths of equal length could be returned in any order and still be valid
     for (const auto& path : paths) {
-        auto range = cost_to_path_index.equal_range(path.total_weight);
+        auto range = cost_to_path_index.equal_range(path.total_cost);
         if (range.first == range.second) {
             // No match
             return false;
@@ -100,7 +101,7 @@ TEST(ShortestPaths, DijkstraSmallAcyclicGraph) {
     shortest_paths::Path<> expected_path{
         {0, 1, 3, 4, 5}, // nodes
         {0, 3, 6, 8},    // edges
-        {0.0, 50.0, 90.0, 120.0, 160.0}, // weights
+        {0.0, 50.0, 90.0, 120.0, 160.0}, // costs
         160.0 // total weight
     };
 
@@ -145,7 +146,7 @@ TEST(ShortestPaths, DijkstraSmallAcyclicGraphParallelEdges) {
     shortest_paths::Path<> expected_path{
         {0, 1, 3, 4, 5}, // nodes
         {0, 3, 6, 8},    // edges
-        {0.0, 50.0, 90.0, 120.0, 160.0}, // weights
+        {0.0, 50.0, 90.0, 120.0, 160.0}, // costs
         160.0 // total weight
     };
 
@@ -188,7 +189,7 @@ TEST(ShortestPaths, DijkstraSmallGraphWithCycle) {
     shortest_paths::Path<> expected_path{
         {0, 1, 3, 4, 5}, // nodes
         {0, 3, 6, 8},    // edges
-        {0.0, 50.0, 90.0, 120.0, 160.0}, // weights
+        {0.0, 50.0, 90.0, 120.0, 160.0}, // costs
         160.0 // total weight
     };
 
@@ -232,7 +233,7 @@ TEST(ShortestPaths, DijkstraSmallGraphWithNegativeCycle) {
     shortest_paths::Path<> expected_path{
         {0, 1, 3, 4, 5}, // nodes
         {0, 3, 6, 8},    // edges
-        {0.0, 50.0, 90.0, 60.0, 100.0}, // weights
+        {0.0, 50.0, 90.0, 60.0, 100.0}, // costs
         100.0 // total weight
     };
 
@@ -271,7 +272,7 @@ TEST(ShortestPaths, DijkstraAllNegativeCycles) {
     );
     auto path = shortest_paths::Dijkstra(*G, 0, 5, {}, {});
     ASSERT_FALSE(path.empty());
-    ASSERT_EQ(path.size(), 5);
+    ASSERT_EQ(path.size(), 5ULL);
 }
 
 TEST(ShortestPaths, DijkstraHugeCyclicGraph) {
@@ -292,7 +293,7 @@ TEST(ShortestPaths, DijkstraHugeCyclicGraph) {
     auto path = shortest_paths::Dijkstra(*G, 0, NUM_VERTICIES-1, {}, {});
     ASSERT_EQ(path.empty(), false);
     ASSERT_EQ(path.size(), SHORTEST_PATH_EDGES);
-    ASSERT_DOUBLE_EQ(path.total_weight, (SHORTEST_PATH_EDGES) * 1.0);
+    ASSERT_DOUBLE_EQ(path.total_cost, (SHORTEST_PATH_EDGES) * 1.0);
 }
 
 TEST(ShortestPaths, YensEmptyGraph) {
@@ -502,9 +503,132 @@ TEST(ShortestPaths, YensComplexGraph) {
     double prev_weight = -std::numeric_limits<double>::infinity();
     for (size_t i = 0; i < paths.size(); i++) {
         const auto& path = paths[i];
-        ASSERT_GE(path.total_weight, prev_weight) << "Path " << i << " had weight less than prevous path";
-        prev_weight = path.total_weight;
+        ASSERT_GE(path.total_cost, prev_weight) << "Path " << i << " had weight less than prevous path";
+        prev_weight = path.total_cost;
     }
+}
+
+TEST(ShortestPaths, BellmanFordEmptyGraph) {
+    auto G = mg_generate::BuildGraph(0, {});
+
+    auto path = shortest_paths::BellmanFord<uint64_t>(*G, 0, 0, {}, {});
+
+    ASSERT_TRUE(path.empty());
+}
+
+TEST(ShortestPaths, BellmanFordSingleNode) {
+    auto G = mg_generate::BuildGraph(1, {});
+
+    auto path = shortest_paths::BellmanFord<uint64_t>(*G, 0, 0, {}, {});
+
+    ASSERT_TRUE(path.empty());
+}
+
+TEST(ShortestPaths, BellmanFordDisconnectedNodes) {
+    auto G = mg_generate::BuildGraph(10, {});
+
+    auto path = shortest_paths::BellmanFord<uint64_t>(*G, 0, 9, {}, {});
+
+    ASSERT_TRUE(path.empty());
+}
+
+/*
+ *                  ┌─────────────10───────────────┐
+ *                ┌─▼─┐                          ┌─┴─┐
+ *   ┌──50───────►│ 2 ├─────────┬────────80─────►│ 4 │
+ *   │            └───┘         │                └▲─┬┘
+ *   │                         40                 │ │
+ *   │                          │                 │ 40
+ * ┌─┴─┐                       ┌▼──┐              │ │
+ * │ 0 ├────────100───────────►│ 3 ├──┬──30───────┘ │
+ * └─┬─┘                       └▲──┘  │             │
+ *   │                          │     │          ┌──▼┐
+ *   │                         40     └──80─────►│ 5 │
+ *   │                          │                └───┘
+ *   │            ┌───┐         │
+ *   └──50───────►│ 1 ├─────────┘
+ *                └───┘
+ */
+TEST(ShortestPaths, BellmanFordSmallGraphWithCycle) {
+    size_t NUM_VERTEX = 6;
+    uint64_t SOURCE = 0;
+    auto G = mg_generate::BuildWeightedGraph(
+        NUM_VERTEX,
+        {
+            /* 0*/ {{0, 1}, 50.0}, /* 1*/ {{0, 2}, 50.0}, /* 2*/ {{0, 3}, 100.0},
+            /* 3*/ {{1, 3}, 40.0},
+            /* 4*/ {{2, 3}, 40.0}, /* 5*/ {{2, 4}, 80.0},
+            /* 6*/ {{3, 4}, 30.0}, /* 7*/ {{3, 5}, 80.0},
+            /* 8*/ {{4, 5}, 40.0},
+            // new edges
+            /* 9*/ {{4, 2}, 10.0},
+        },
+        mg_graph::GraphType::kDirectedGraph
+    );
+    // Expected paths from 0 -> i
+    std::vector<shortest_paths::Path<>> expected_paths{
+        /*0->0*/ {{0}, {}, {0.0}, 0.0},
+        /*0->1*/ {{0, 1}, {0}, {0.0, 50.0}, 50.0},
+        /*0->2*/ {{0, 2}, {1}, {0.0, 50.0}, 50.0},
+        /*0->3*/ {{0, 1, 3}, {0, 3}, {0.0, 50.0, 90.0}, 90.0},
+        /*0->4*/ {{0, 1, 3, 4}, {0, 3, 6}, {0.0, 50.0, 90.0, 120.0}, 120.0},
+        /*0->5*/ {{0, 1, 3, 4, 5}, {0, 3, 6, 8}, {0.0, 50.0, 90.0, 120.0, 160.0}, 160.0}
+    };
+
+    shortest_paths::BellmanFordPathfinder<> pathfinder(*G, SOURCE);
+    ASSERT_FALSE(pathfinder.has_negative_cycle());
+    for (uint64_t target = 0; target  < NUM_VERTEX; target++) {
+        ASSERT_TRUE(pathfinder.has_path_to(target));
+        auto path = pathfinder.path_to(target);
+        ASSERT_EQ(path, expected_paths[target]);
+    }
+}
+
+/*
+ *                  ┌─────────── -100 ─────────────┐
+ *                ┌─▼─┐                          ┌─┴─┐
+ *   ┌──50───────►│ 2 ├─────────┬────────80─────►│ 4 │
+ *   │            └───┘         │                └▲─┬┘
+ *   │                         40                 │ │
+ *   │                          │                 │ 40
+ * ┌─┴─┐                       ┌▼──┐              │ │
+ * │ 0 ├────────100───────────►│ 3 ├──┬─-30───────┘ │
+ * └─┬─┘                       └▲──┘  │             │
+ *   │                          │     │          ┌──▼┐
+ *   │                         40     └──80─────►│ 5 │
+ *   │                          │                └───┘
+ *   │            ┌───┐         │
+ *   └──50───────►│ 1 ├─────────┘
+ *                └───┘
+ */
+TEST(ShortestPaths, BellmanFordSmallGraphWithNegativeCycle) {
+    auto G = mg_generate::BuildWeightedGraph(
+        6,
+        {
+            /* 0*/ {{0, 1}, 50.0}, /* 1*/ {{0, 2}, 50.0}, /* 2*/ {{0, 3}, 100.0},
+            /* 3*/ {{1, 3}, 40.0},
+            /* 4*/ {{2, 3}, 40.0}, /* 5*/ {{2, 4}, 80.0},
+            /* 6*/ {{3, 4}, -30.0}, /* 7*/ {{3, 5}, 80.0},
+            /* 8*/ {{4, 5}, 40.0},
+            // new edges
+            /* 9*/ {{4, 2}, -100.0},
+        },
+        mg_graph::GraphType::kDirectedGraph
+    );
+    shortest_paths::Path<> expected_cycle{
+        {2, 4, 2},
+        {5, 9},
+        {0.0, 80.0, -20.0},
+        -20.0,
+    };
+
+    shortest_paths::BellmanFordPathfinder<> pathfinder(*G, 0);
+    ASSERT_TRUE(pathfinder.has_negative_cycle());
+    auto cycle = pathfinder.negative_cycle().value();
+    ASSERT_EQ(cycle.nodes, expected_cycle.nodes);
+    ASSERT_EQ(cycle.edges, expected_cycle.edges);
+    ASSERT_EQ(cycle.costs, expected_cycle.costs);
+    ASSERT_EQ(cycle.total_cost, expected_cycle.total_cost);
 }
 
 int main(int argc, char **argv) {
