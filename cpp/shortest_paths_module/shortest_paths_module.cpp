@@ -171,8 +171,8 @@ void BellmanFordProcedure(mgp_list *args, mgp_graph *memgraph_graph, mgp_result 
 
         const auto source_node = arguments[0].ValueNode();
         if (!arguments[1].IsNull()) target_nodes = arguments[1].ValueList();
-        const auto weight_property = arguments[3].ValueString();
-        const auto default_weight = arguments[4].ValueDouble();
+        const auto weight_property = arguments[2].ValueString();
+        const auto default_weight = arguments[3].ValueDouble();
 
         bool weighted = ! weight_property.empty();
         const char * weight_prop_cstr = weighted ? weight_property.data() : nullptr;
