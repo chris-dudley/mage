@@ -161,18 +161,22 @@ void YensSubgraph(mgp_list *args, mgp_graph *memgraph_graph, mgp_result *result,
 }
 
 void BellmanFordProcedure(mgp_list *args, mgp_graph *memgraph_graph, mgp_result *result, mgp_memory *memory) {
+    // Indicies in the arguments list for parameters
+    enum ArgIdx : size_t {
+        Source, Targets, WeightProp, DefaultWeight
+    };
+
     mgp::MemoryDispatcherGuard mem_guard(memory);
     mgp::Graph graph{memgraph_graph};
 
     const auto arguments = mgp::List(args);
     const auto record_factory = mgp::RecordFactory(result);
     try {
-        mgp::List target_nodes;
 
-        const auto source_node = arguments[0].ValueNode();
-        if (!arguments[1].IsNull()) target_nodes = arguments[1].ValueList();
-        const auto weight_property = arguments[2].ValueString();
-        const auto default_weight = arguments[3].ValueDouble();
+        const auto source_node = arguments[ArgIdx::Source].ValueNode();
+        const auto target_nodes = arguments[ArgIdx::Targets].ValueList();
+        const auto weight_property = arguments[ArgIdx::WeightProp].ValueString();
+        const auto default_weight = arguments[ArgIdx::DefaultWeight].ValueDouble();
 
         bool weighted = ! weight_property.empty();
         const char * weight_prop_cstr = weighted ? weight_property.data() : nullptr;
@@ -227,11 +231,11 @@ void BellmanFordProcedure(mgp_list *args, mgp_graph *memgraph_graph, mgp_result 
 
         for (auto target_id : targets) {
             auto target_mgid = GetMemgraphNodeId(graph_view, target_id);
-            mgp::Node target_node = graph.GetNodeById(mgp::Id::FromUint(target_mgid));
 
             auto path = pathfinder.path_to(target_id);
             if (path.empty()) continue;
 
+            mgp::Node target_node = graph.GetNodeById(mgp::Id::FromUint(target_mgid));
             mgp::Path result_path = TranslatePath(graph, graph_view, path);
             mgp::List costs(path.costs.size()); // accumulated cost at each node
             for (auto cost : path.costs) {
@@ -311,7 +315,7 @@ extern "C" int mgp_init_module(struct mgp_module *module, struct mgp_memory *mem
                 mgp::Parameter(shortest_paths::kArgumentSourceNode, mgp::Type::Node),
                 mgp::Parameter(shortest_paths::kArgumentTargetNodes, {mgp::Type::List, mgp::Type::Node}, empty_list),
                 mgp::Parameter(shortest_paths::kArgumentRelationshipWeightProperty, mgp::Type::String, ""),
-                mgp::Parameter(shortest_paths::kArgumentDefaultWeight, mgp::Type::Double, 1.0),
+                mgp::Parameter(shortest_paths::kArgumentDefaultWeight, mgp::Type::Double, 1.0)
             },
             {
                 mgp::Return(shortest_paths::kReturnNegativeCycle, mgp::Type::Bool),

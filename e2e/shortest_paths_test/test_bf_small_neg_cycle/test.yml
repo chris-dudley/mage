@@ -1,0 +1,28 @@
+query: >-
+    MATCH (source:Node {id: 0})
+    CALL shortest_paths.bellman_ford(source, [], 'weight')
+    YIELD
+      negative_cycle,
+      source_node,
+      target_node,
+      total_cost,
+      costs,
+      path
+    RETURN
+      negative_cycle,
+      source_node.id AS source_id,
+      target_node.id AS target_id,
+      total_cost,
+      costs,
+      extract(n IN nodes(path) | n.id) AS node_ids,
+      extract(r IN relationships(path) | r.id) AS edge_ids
+    ORDER BY target_id;
+
+output:
+  - negative_cycle: true
+    source_id: 2
+    target_id: 2
+    total_cost: -20
+    costs: [0, 80, -20]
+    node_ids: [2, 4, 2]
+    edge_ids: [5, 9]
