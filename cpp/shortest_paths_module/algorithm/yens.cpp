@@ -47,7 +47,7 @@ std::vector<Path<>> KShortestPaths(
         return result;
     }
 
-    auto shortest_path = shortest_path_func(graph, source_id, sink_id, {}, {});
+    auto shortest_path = shortest_path_func(graph, source_id, sink_id, {}, {}, check_abort);
     if (shortest_path.empty()) {
         // No paths found
         return result;
@@ -135,7 +135,7 @@ std::vector<Path<>> KShortestPaths(
             } 
 
             while (remaining_out_edges-- > 0) {
-                auto spur_path = shortest_path_func(graph, spur_node, sink_id, ignored_edges, ignored_nodes);
+                auto spur_path = shortest_path_func(graph, spur_node, sink_id, ignored_edges, ignored_nodes, check_abort);
                 if (spur_path.empty()) {
                     // No more available paths from this node.
                     break;

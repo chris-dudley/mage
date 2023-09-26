@@ -200,7 +200,7 @@ public:
 
 private:
     void reset(const GraphViewType& graph, TSize source) {
-        num_vertex = graph.Nodes().Size();
+        num_vertex = graph.Nodes().size();
         source_id = source;
         dist_to.assign(num_vertex, POS_INF);
         edge_into.assign(num_vertex, std::nullopt);

@@ -49,7 +49,7 @@ bool CheckPaths(const std::vector<shortest_paths::Path<>>& paths, const std::vec
 TEST(ShortestPaths, DijkstraEmptyGraph) {
     auto G = mg_generate::BuildGraph(0, {});
 
-    auto path = shortest_paths::Dijkstra(*G, 0, 0, {}, {});
+    auto path = shortest_paths::Dijkstra(*G, 0, 0, {}, {}, check_abort_noop);
 
     ASSERT_TRUE(path.empty());
 }
@@ -57,7 +57,7 @@ TEST(ShortestPaths, DijkstraEmptyGraph) {
 TEST(ShortestPaths, DijkstraSingleNode) {
     auto G = mg_generate::BuildGraph(1, {});
 
-    auto path = shortest_paths::Dijkstra(*G, 0, 0, {}, {});
+    auto path = shortest_paths::Dijkstra(*G, 0, 0, {}, {}, check_abort_noop);
 
     ASSERT_TRUE(path.empty());
 }
@@ -65,7 +65,7 @@ TEST(ShortestPaths, DijkstraSingleNode) {
 TEST(ShortestPaths, DijkstraDisconnectedNodes) {
     auto G = mg_generate::BuildGraph(10, {});
 
-    auto path = shortest_paths::Dijkstra(*G, 0, 9, {}, {});
+    auto path = shortest_paths::Dijkstra(*G, 0, 9, {}, {}, check_abort_noop);
 
     ASSERT_TRUE(path.empty());
 }
@@ -105,7 +105,7 @@ TEST(ShortestPaths, DijkstraSmallAcyclicGraph) {
         160.0 // total weight
     };
 
-    auto path = shortest_paths::Dijkstra(*G, 0, 5, {}, {});
+    auto path = shortest_paths::Dijkstra(*G, 0, 5, {}, {}, check_abort_noop);
     ASSERT_EQ(path, expected_path);
 }
 
@@ -150,7 +150,7 @@ TEST(ShortestPaths, DijkstraSmallAcyclicGraphParallelEdges) {
         160.0 // total weight
     };
 
-    auto path = shortest_paths::Dijkstra(*G, 0, 5, {}, {});
+    auto path = shortest_paths::Dijkstra(*G, 0, 5, {}, {}, check_abort_noop);
     ASSERT_EQ(path, expected_path);
 }
 
@@ -193,7 +193,7 @@ TEST(ShortestPaths, DijkstraSmallGraphWithCycle) {
         160.0 // total weight
     };
 
-    auto path = shortest_paths::Dijkstra(*G, 0, 5, {}, {});
+    auto path = shortest_paths::Dijkstra(*G, 0, 5, {}, {}, check_abort_noop);
     ASSERT_EQ(path, expected_path);
 }
 
@@ -237,7 +237,7 @@ TEST(ShortestPaths, DijkstraSmallGraphWithNegativeCycle) {
         100.0 // total weight
     };
 
-    auto path = shortest_paths::Dijkstra(*G, 0, 5, {}, {});
+    auto path = shortest_paths::Dijkstra(*G, 0, 5, {}, {}, check_abort_noop);
     ASSERT_EQ(path, expected_path);
 }
 
@@ -270,7 +270,7 @@ TEST(ShortestPaths, DijkstraAllNegativeCycles) {
         },
         mg_graph::GraphType::kDirectedGraph
     );
-    auto path = shortest_paths::Dijkstra(*G, 0, 5, {}, {});
+    auto path = shortest_paths::Dijkstra(*G, 0, 5, {}, {}, check_abort_noop);
     ASSERT_FALSE(path.empty());
     ASSERT_EQ(path.size(), 5ULL);
 }
@@ -290,7 +290,7 @@ TEST(ShortestPaths, DijkstraHugeCyclicGraph) {
     }
 
     // Find a path from 0 to NUM_VERTICIES-1
-    auto path = shortest_paths::Dijkstra(*G, 0, NUM_VERTICIES-1, {}, {});
+    auto path = shortest_paths::Dijkstra(*G, 0, NUM_VERTICIES-1, {}, {}, check_abort_noop);
     ASSERT_EQ(path.empty(), false);
     ASSERT_EQ(path.size(), SHORTEST_PATH_EDGES);
     ASSERT_DOUBLE_EQ(path.total_cost, (SHORTEST_PATH_EDGES) * 1.0);

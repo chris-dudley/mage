@@ -24,7 +24,8 @@ bool NodeAndDistanceGreater(const NodeAndDistance &a, const NodeAndDistance &b) 
 
 Path<> Dijkstra(
     const mg_graph::GraphView<> &graph, uint64_t source_id, uint64_t sink_id,
-    const EdgeIdSet& ignored_edges, const NodeIdSet& ignored_nodes
+    const EdgeIdSet& ignored_edges, const NodeIdSet& ignored_nodes,
+    CheckAbortFunc check_abort
 ) {
     Path<> result{source_id};
     if (source_id == sink_id) {
@@ -57,6 +58,8 @@ Path<> Dijkstra(
     node_queue.emplace(source_id, 0.0);
 
     while (!node_queue.empty()) {
+        check_abort();
+
         auto current_node = node_queue.top().first;
         node_queue.pop();
 

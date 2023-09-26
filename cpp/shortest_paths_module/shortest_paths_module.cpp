@@ -8,6 +8,7 @@
 #include "algorithm/yens.hpp"
 #include "algorithm/procedures.hpp"
 #include "algorithm/bellman_ford.hpp"
+#include "algorithm/iterative_bf.hpp"
 
 namespace {
 
@@ -22,6 +23,10 @@ uint64_t GetInnerNodeId(const mg_graph::GraphView<>& graph, uint64_t memgraph_id
     return graph.GetInnerNodeId(memgraph_id);
 }
 
+uint64_t GetInnerEdgeId(const mg_graph::GraphView<>& graph, uint64_t memgraph_id) {
+    return graph.GetInnerEdgeId(memgraph_id);
+}
+
 // Add wrappers for GetMemgraph(Node|Edge)Id just in case.
 uint64_t GetMemgraphNodeId(const mg_graph::GraphView<>& graph, uint64_t inner_id) {
     return graph.GetMemgraphNodeId(inner_id);
@@ -29,6 +34,31 @@ uint64_t GetMemgraphNodeId(const mg_graph::GraphView<>& graph, uint64_t inner_id
 uint64_t GetMemgraphEdgeId(const mg_graph::GraphView<>& graph, uint64_t inner_id) {
     return graph.GetMemgraphEdgeId(inner_id);
 }
+
+std::string MapGetDefaultString(const mgp::Map& map, const std::string_view& key, const std::string_view& default_value) {
+    auto value = map.At(key);
+    if (!value.IsString()) {
+        return std::string(default_value);
+    }
+    return std::string(value.ValueString());
+}
+
+double MapGetDefaultDouble(const mgp::Map& map, const std::string_view& key, double default_value) {
+    auto value = map.At(key);
+    if (!value.IsDouble()) {
+        return default_value;
+    }
+    return value.ValueDouble();
+}
+
+bool MapGetDefaultBool(const mgp::Map& map, const std::string_view& key, bool default_value) {
+    auto value = map.At(key);
+    if (!value.IsBool()) {
+        return default_value;
+    }
+    return value.ValueBool();
+}
+
 
 mgp::Path TranslatePath(const mgp::Graph& graph, const mg_graph::GraphView<>& graph_view, const shortest_paths::Path<>& path) {
     auto source_mgid = mgp::Id::FromUint(GetMemgraphNodeId(graph_view, path.nodes[0]));
@@ -72,27 +102,23 @@ mgp::Path TranslatePath(const mgp::Graph& graph, const mg_graph::GraphView<>& gr
     return result_path;
 }
 
-void YensKShortestPaths(mgp_list *args, mgp_graph *memgraph_graph, mgp_result *result, mgp_memory *memory, bool subgraph) {
+void YensKShortestPaths(mgp_list *args, mgp_graph *memgraph_graph, mgp_result *result, mgp_memory *memory) {
+    // Indicies in the arguments list for parameters
+    enum ArgIdx : size_t {
+        Source, Sink, K, WeightProp, DefaultWeight
+    };
+
     mgp::MemoryDispatcherGuard mem_guard(memory);
     mgp::Graph graph{memgraph_graph};
 
     const auto arguments = mgp::List(args);
     const auto record_factory = mgp::RecordFactory(result);
     try {
-        size_t args_idx = 0;
-        mgp_list *subgraph_nodes = nullptr, *subgraph_edges = nullptr;
-        if (subgraph) {
-            // Can't use wrappers here, as we need the underlying mgp_list* values to pass to
-            // GetSubgraphView
-            subgraph_nodes = mgp::value_get_list(mgp::list_at(args, args_idx++));
-            subgraph_edges = mgp::value_get_list(mgp::list_at(args, args_idx++));
-        }
-
-        const auto source_node = arguments[args_idx++].ValueNode();
-        const auto sink_node = arguments[args_idx++].ValueNode();
-        const auto K = arguments[args_idx++].ValueInt();
-        const auto weight_property = arguments[args_idx++].ValueString();
-        const auto default_weight = arguments[args_idx++].ValueDouble();
+        const auto source_node = arguments[ArgIdx::Source].ValueNode();
+        const auto sink_node = arguments[ArgIdx::Sink].ValueNode();
+        const auto K = arguments[ArgIdx::K].ValueInt();
+        const auto weight_property = arguments[ArgIdx::WeightProp].ValueString();
+        const auto default_weight = arguments[ArgIdx::DefaultWeight].ValueDouble();
 
         bool weighted = ! weight_property.empty();
         const char * weight_prop_cstr = weighted ? weight_property.data() : nullptr;
@@ -107,14 +133,10 @@ void YensKShortestPaths(mgp_list *args, mgp_graph *memgraph_graph, mgp_result *r
 
         shortest_paths::ShortestPathFunc sp_func = shortest_paths::Dijkstra;
 
-        auto graph_view_ptr = subgraph ?
-            mg_utility::GetSubgraphView(
-                memgraph_graph, result, memory, subgraph_nodes, subgraph_edges, mg_graph::GraphType::kDirectedGraph,
-                weighted, weight_prop_cstr, default_weight)
-            :
-            mg_utility::GetGraphView(
-                memgraph_graph, result, memory, mg_graph::GraphType::kDirectedGraph,
-                weighted, weight_prop_cstr, default_weight);
+        auto graph_view_ptr = mg_utility::GetGraphView(
+            memgraph_graph, result, memory, mg_graph::GraphType::kDirectedGraph,
+            weighted, weight_prop_cstr, default_weight
+        );
 
         const mg_graph::GraphView<>& graph_view = *graph_view_ptr;
 
@@ -151,14 +173,6 @@ void YensKShortestPaths(mgp_list *args, mgp_graph *memgraph_graph, mgp_result *r
     }
 }
 
-
-void YensGraph(mgp_list *args, mgp_graph *memgraph_graph, mgp_result *result, mgp_memory *memory) {
-    YensKShortestPaths(args, memgraph_graph, result, memory, false);
-}
-
-void YensSubgraph(mgp_list *args, mgp_graph *memgraph_graph, mgp_result *result, mgp_memory *memory) {
-    YensKShortestPaths(args, memgraph_graph, result, memory, true);
-}
 
 void BellmanFordProcedure(mgp_list *args, mgp_graph *memgraph_graph, mgp_result *result, mgp_memory *memory) {
     // Indicies in the arguments list for parameters
@@ -256,6 +270,91 @@ void BellmanFordProcedure(mgp_list *args, mgp_graph *memgraph_graph, mgp_result 
     }
 }
 
+std::vector<double> GetScores(const mgp::Graph& graph, const mg_graph::GraphView<>& graph_view, const std::string& score_prop_name, double default_score) {
+    const auto& edges = graph_view.Edges();
+    std::vector<double> scores(edges.size(), default_score);
+    if (score_prop_name.empty()) {
+        return scores;
+    }
+    for (const auto& relationship : graph.Relationships()) {
+        auto inner_id = GetInnerEdgeId(graph_view, relationship.Id().AsUint());
+        auto score_prop = relationship.GetProperty(score_prop_name);
+    
+        // To match the handling of weights in mg_graph, properties that aren't doubles or ints will receive
+        // the default score.
+        if (score_prop.IsNumeric()) {
+            scores[inner_id] = score_prop.ValueNumeric();
+        }
+    }
+
+    return scores;
+}
+
+void IterativeBellmanFordProcedure(mgp_list *args, mgp_graph *memgraph_graph, mgp_result *result, mgp_memory *memory) {
+    // Indicies in the arguments list for parameters
+    enum ArgIdx : size_t {
+        Source, Target, Params
+    };
+
+    mgp::MemoryDispatcherGuard mem_guard(memory);
+    mgp::Graph graph{memgraph_graph};
+
+    const auto arguments = mgp::List(args);
+    const auto record_factory = mgp::RecordFactory(result);
+    try {
+
+        const auto source_node = arguments[ArgIdx::Source].ValueNode();
+        const auto target_node = arguments[ArgIdx::Target].ValueNode();
+        const auto params = arguments[ArgIdx::Params].ValueMap();
+
+        std::string weight_property = MapGetDefaultString(params, "weight_property", "");
+        std::string score_property = MapGetDefaultString(params, "score_property", "");
+        double default_weight = MapGetDefaultDouble(params, "default_weight", 1.0);
+        double default_score = MapGetDefaultDouble(params, "default_score", 1.0);
+        bool cull_ascending = MapGetDefaultBool(params, "cull_ascending", true);
+
+        bool weighted = ! weight_property.empty();
+        const char * weight_prop_cstr = weighted ? weight_property.c_str() : nullptr;
+
+        auto graph_view_ptr = mg_utility::GetGraphView(
+            memgraph_graph, result, memory, mg_graph::GraphType::kDirectedGraph,
+            weighted, weight_prop_cstr, default_weight
+        );
+        const mg_graph::GraphView<>& graph_view = *graph_view_ptr;
+
+        std::vector<double> scores = GetScores(graph, graph_view, score_property, default_score);
+
+
+        const auto source_mgid = source_node.Id().AsUint();
+        const auto source_id = GetInnerNodeId(graph_view, source_mgid);
+        const auto target_mgid = target_node.Id().AsUint();
+        const auto target_id = GetInnerNodeId(graph_view, target_mgid);
+        auto abort_func = [&graph] () { graph.CheckMustAbort(); };
+
+        shortest_paths::IterativeBellmanFordPathfinder<uint64_t> pathfinder(scores, cull_ascending);
+        auto path = pathfinder.search(graph_view, source_id, target_id, {}, {}, abort_func);
+        if (path.empty()) {
+            return;
+        }
+
+        mgp::Path result_path = TranslatePath(graph, graph_view, path);
+        mgp::List costs(path.costs.size()); // accumulated cost at each node
+        for (auto cost : path.costs) {
+            costs.Append(mgp::Value(cost));
+        }
+
+        auto record = record_factory.NewRecord();
+        record.Insert(std::string(shortest_paths::kReturnSourceNode).c_str(), source_node);
+        record.Insert(std::string(shortest_paths::kReturnTargetNode).c_str(), target_node);
+        record.Insert(std::string(shortest_paths::kReturnTotalCost).c_str(), path.total_cost);
+        record.Insert(std::string(shortest_paths::kReturnCosts).c_str(), costs);
+        record.Insert(std::string(shortest_paths::kReturnPath).c_str(), result_path);
+    } catch (const std::exception& e) {
+        record_factory.SetErrorMessage(e.what());
+        return;
+    }
+}
+
 } // namespace
 
 extern "C" int mgp_init_module(struct mgp_module *module, struct mgp_memory *memory) {
@@ -263,35 +362,11 @@ extern "C" int mgp_init_module(struct mgp_module *module, struct mgp_memory *mem
         mgp::MemoryDispatcherGuard mem_guard(memory);
 
         auto return_costs_type = std::make_pair(mgp::Type::List, mgp::Type::Double);
-        auto subgraph_nodes_type = std::make_pair(mgp::Type::List, mgp::Type::Node);
-        auto subgraph_edges_type = std::make_pair(mgp::Type::List, mgp::Type::Relationship);
         mgp::Value empty_list(mgp::List{});
 
         mgp::AddProcedure(
-            YensGraph, shortest_paths::kProcedureYens, mgp::ProcedureType::Read,
+            YensKShortestPaths, shortest_paths::kProcedureYens, mgp::ProcedureType::Read,
             {
-                mgp::Parameter(shortest_paths::kArgumentSourceNode, mgp::Type::Node),
-                mgp::Parameter(shortest_paths::kArgumentTargetNode, mgp::Type::Node),
-                mgp::Parameter(shortest_paths::kArgumentK, mgp::Type::Int, 1L),
-                mgp::Parameter(shortest_paths::kArgumentRelationshipWeightProperty, mgp::Type::String, ""),
-                mgp::Parameter(shortest_paths::kArgumentDefaultWeight, mgp::Type::Double, 1.0),
-            },
-            {
-                mgp::Return(shortest_paths::kReturnIndex, mgp::Type::Int),
-                mgp::Return(shortest_paths::kReturnSourceNode, mgp::Type::Node),
-                mgp::Return(shortest_paths::kReturnTargetNode, mgp::Type::Node),
-                mgp::Return(shortest_paths::kReturnTotalCost, mgp::Type::Double),
-                mgp::Return(shortest_paths::kReturnCosts, return_costs_type),
-                mgp::Return(shortest_paths::kReturnPath, mgp::Type::Path)
-            },
-            module, memory
-        );
-
-        mgp::AddProcedure(
-            YensSubgraph, shortest_paths::kProcedureYensSubgraph, mgp::ProcedureType::Read,
-            {
-                mgp::Parameter(shortest_paths::kArgumentSubgraphNodes, subgraph_nodes_type),
-                mgp::Parameter(shortest_paths::kArgumentSubgraphEdges, subgraph_edges_type),
                 mgp::Parameter(shortest_paths::kArgumentSourceNode, mgp::Type::Node),
                 mgp::Parameter(shortest_paths::kArgumentTargetNode, mgp::Type::Node),
                 mgp::Parameter(shortest_paths::kArgumentK, mgp::Type::Int, 1L),
@@ -319,6 +394,23 @@ extern "C" int mgp_init_module(struct mgp_module *module, struct mgp_memory *mem
             },
             {
                 mgp::Return(shortest_paths::kReturnNegativeCycle, mgp::Type::Bool),
+                mgp::Return(shortest_paths::kReturnSourceNode, mgp::Type::Node),
+                mgp::Return(shortest_paths::kReturnTargetNode, mgp::Type::Node),
+                mgp::Return(shortest_paths::kReturnTotalCost, mgp::Type::Double),
+                mgp::Return(shortest_paths::kReturnCosts, return_costs_type),
+                mgp::Return(shortest_paths::kReturnPath, mgp::Type::Path)
+            },
+            module, memory
+        );
+
+        mgp::AddProcedure(
+            IterativeBellmanFordProcedure, shortest_paths::kProcedureIterativeBellmanFord, mgp::ProcedureType::Read,
+            {
+                mgp::Parameter(shortest_paths::kArgumentSourceNode, mgp::Type::Node),
+                mgp::Parameter(shortest_paths::kArgumentTargetNode, mgp::Type::Node),
+                mgp::Parameter(shortest_paths::kArgumentParams, mgp::Type::Map)
+            },
+            {
                 mgp::Return(shortest_paths::kReturnSourceNode, mgp::Type::Node),
                 mgp::Return(shortest_paths::kReturnTargetNode, mgp::Type::Node),
                 mgp::Return(shortest_paths::kReturnTotalCost, mgp::Type::Double),
