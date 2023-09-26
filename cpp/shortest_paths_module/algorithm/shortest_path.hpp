@@ -17,12 +17,19 @@ using EdgeIdSet = std::unordered_set<uint64_t>;
 /// @brief A type for representing sets of node Ids for exclusion during pathfinding.
 using NodeIdSet = std::unordered_set<uint64_t>;
 
+/// @brief Signature of a function used to check if the execution should be aborted.
+///     The function is expected to throw an exception if the execution should be aborted,
+///     and do nothing otherwise.
+using CheckAbortFunc = std::function<void()>;
+
+
 /// @brief Signature for functions that compute the shortest path between two nodes in a graph.
 ///    The two set arguments are sets of edges and nodes to ignore, respectively.
 using ShortestPathFunc = std::function<
     Path<>(
         const mg_graph::GraphView<> &, std::uint64_t, std::uint64_t,
-        const NodeIdSet&, const EdgeIdSet&
+        const NodeIdSet&, const EdgeIdSet&,
+        CheckAbortFunc
     )
 >;
 
@@ -35,7 +42,8 @@ using ShortestPathFunc = std::function<
 /// @return Path from source to sink.
 Path<> Dijkstra(
     const mg_graph::GraphView<> &graph, std::uint64_t source_id, std::uint64_t sink_id,
-    const EdgeIdSet& ignored_edges, const NodeIdSet& ignored_nodes
+    const EdgeIdSet& ignored_edges, const NodeIdSet& ignored_nodes,
+    CheckAbortFunc check_abort
 );
 
 } // namespace shortest_paths

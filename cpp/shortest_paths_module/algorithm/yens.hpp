@@ -6,11 +6,6 @@
 
 namespace shortest_paths {
 
-/// @brief Signature of a function used to check if the execution should be aborted.
-///     The function is expected to throw an exception if the execution should be aborted,
-///     and do nothing otherwise.
-using CheckAbortFunc = std::function<void()>;
-
 /// @brief Computes the K shortest paths in the graph from source to sink.
 /// @param graph Current graph.
 /// @param source_id ID of source node for paths.
