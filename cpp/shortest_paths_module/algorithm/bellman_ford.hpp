@@ -67,8 +67,9 @@ public:
     ///     If a negative cycle is detected, that will be stored.
     /// @param graph The graph to search.
     /// @param source The ID of the source node.
+    /// @param check_abort Function that should throw an exception if execution should be aborted.
     /// @throws std::invalid_argument if the source node is not in the graph.
-    BellmanFordPathfinder(const GraphViewType& graph, TSize source):
+    BellmanFordPathfinder(const GraphViewType& graph, TSize source, CheckAbortFunc check_abort = CheckAbortNoop):
         num_vertex(graph.Nodes().size()),
         source_id(source),
         dist_to(graph.Nodes().size(), POS_INF),
@@ -87,7 +88,7 @@ public:
         }
         EdgeIdSet empty_edges;
         NodeIdSet empty_nodes;
-        do_search(graph, source, empty_edges, empty_nodes);
+        do_search(graph, source, empty_edges, empty_nodes, check_abort);
     }
 
     /// @brief Searches for the shortests paths on `graph` from `source` to all other reachable nodes.
@@ -98,8 +99,13 @@ public:
     /// @param source The ID of the source node.
     /// @param ignored_edges Set of edge IDs to ignore during pathfinding.
     /// @param ignored_nodes Set of node IDs to ignore during pathfinding.
+    /// @param check_abort Function that should throw an exception if execution should be aborted.
     /// @throws std::invalid_argument if the source node is not in the graph.
-    BellmanFordPathfinder(const GraphViewType& graph, TSize source, const EdgeIdSet& ignored_edges, const NodeIdSet& ignored_nodes):
+    BellmanFordPathfinder(
+        const GraphViewType& graph, TSize source,
+        const EdgeIdSet& ignored_edges, const NodeIdSet& ignored_nodes,
+        CheckAbortFunc check_abort = CheckAbortNoop
+    ):
         num_vertex(graph.Nodes().size()),
         source_id(source),
         dist_to(graph.Nodes().size(), POS_INF),
@@ -116,22 +122,23 @@ public:
         if (source >= num_vertex) {
             throw std::invalid_argument("source node not in graph");
         }
-        do_search(graph, source, ignored_edges, ignored_nodes);
+        do_search(graph, source, ignored_edges, ignored_nodes, check_abort);
     }
 
     /// @brief Resets the state of the pathfinder and then searches for the shorest paths on `graph` from `source`
     ///     to all other reachable nodes. If a negative cycle is detected, it will be stored.
     /// @param graph The graph to search.
     /// @param source The ID of the source node.
+    /// @param check_abort Function that should throw an exception if execution should be aborted.
     /// @throws std::invalid_argument if the source node is not in the graph.
-    void search(const GraphViewType& graph, TSize source) {
+    void search(const GraphViewType& graph, TSize source, CheckAbortFunc check_abort = CheckAbortNoop) {
         if (source >= graph.Nodes().size()) {
             throw std::invalid_argument("source node not in graph");
         }
         EdgeIdSet empty_edges;
         NodeIdSet empty_nodes;
         reset(graph, source);
-        do_search(graph, source, empty_edges, empty_nodes);
+        do_search(graph, source, empty_edges, empty_nodes, CheckAbortNoop);
     }
 
     /// @brief Resets the state of the pathfinder and then searches for the shorest paths on `graph` from `source`
@@ -143,13 +150,18 @@ public:
     /// @param source The ID of the source node.
     /// @param ignored_edges Set of edge IDs to ignore during pathfinding.
     /// @param ignored_nodes Set of node IDs to ignore during pathfinding.
+    /// @param check_abort Function that should throw an exception if execution should be aborted.
     /// @throws std::invalid_argument if the source node is not in the graph.
-    void search(const GraphViewType& graph, TSize source, const EdgeIdSet& ignored_edges, const NodeIdSet& ignored_nodes) {
+    void search(
+        const GraphViewType& graph, TSize source,
+        const EdgeIdSet& ignored_edges, const NodeIdSet& ignored_nodes,
+        CheckAbortFunc check_abort = CheckAbortNoop
+    ) {
         if (source >= graph.Nodes().size()) {
             throw std::invalid_argument("source node not in graph");
         }
         reset(graph, source);
-        do_search(graph, source, ignored_edges, ignored_nodes);
+        do_search(graph, source, ignored_edges, ignored_nodes, check_abort);
     }
     
     /// @brief Reports if a negative cycle was detected.
@@ -210,11 +222,17 @@ private:
         cycle = std::nullopt;
     }
 
-    void do_search(const GraphViewType& graph, TSize source, const EdgeIdSet& ignored_edges, const NodeIdSet& ignored_nodes) {
+    void do_search(
+        const GraphViewType& graph, TSize source,
+        const EdgeIdSet& ignored_edges, const NodeIdSet& ignored_nodes,
+        CheckAbortFunc check_abort
+    ) {
         dist_to[source] = 0.0;
         queue.push_back(source);
         on_queue[source] = true;
         while (!queue.empty() && !has_negative_cycle()) {
+            check_abort();
+
             auto next_node = queue.front();
             queue.pop_front();
             on_queue[next_node] = false;
@@ -289,14 +307,16 @@ private:
 /// @param target_id ID of target node for pathfinding.
 /// @param ignored_edges IDs of edges to ignore during pathfinding.
 /// @param ignored_nodes IDs of nodes to ignore during pathfinding.
+/// @param check_abort Function used to periodically check whether execution should be aborted.
 /// @return The path from source to target, which may be empty if none exists.
 template<typename TSize = std::uint64_t>
 Path<TSize> BellmanFord(
     const mg_graph::GraphView<TSize>& graph, TSize source_id, TSize target_id,
     const std::unordered_set<TSize>& ignored_edges,
-    const std::unordered_set<TSize>& ignored_nodes
+    const std::unordered_set<TSize>& ignored_nodes,
+    CheckAbortFunc check_abort
 ) {
-    BellmanFordPathfinder<TSize> pathfinder(graph, source_id, ignored_edges, ignored_nodes);
+    BellmanFordPathfinder<TSize> pathfinder(graph, source_id, ignored_edges, ignored_nodes, check_abort);
     if (pathfinder.has_negative_cycle()) {
         return Path(source_id);
     }

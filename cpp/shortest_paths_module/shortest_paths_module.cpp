@@ -35,31 +35,6 @@ uint64_t GetMemgraphEdgeId(const mg_graph::GraphView<>& graph, uint64_t inner_id
     return graph.GetMemgraphEdgeId(inner_id);
 }
 
-std::string MapGetDefaultString(const mgp::Map& map, const std::string_view& key, const std::string_view& default_value) {
-    auto value = map.At(key);
-    if (!value.IsString()) {
-        return std::string(default_value);
-    }
-    return std::string(value.ValueString());
-}
-
-double MapGetDefaultDouble(const mgp::Map& map, const std::string_view& key, double default_value) {
-    auto value = map.At(key);
-    if (!value.IsDouble()) {
-        return default_value;
-    }
-    return value.ValueDouble();
-}
-
-bool MapGetDefaultBool(const mgp::Map& map, const std::string_view& key, bool default_value) {
-    auto value = map.At(key);
-    if (!value.IsBool()) {
-        return default_value;
-    }
-    return value.ValueBool();
-}
-
-
 mgp::Path TranslatePath(const mgp::Graph& graph, const mg_graph::GraphView<>& graph_view, const shortest_paths::Path<>& path) {
     auto source_mgid = mgp::Id::FromUint(GetMemgraphNodeId(graph_view, path.nodes[0]));
     mgp::Node source_node = graph.GetNodeById(source_mgid);
@@ -272,8 +247,16 @@ void BellmanFordProcedure(mgp_list *args, mgp_graph *memgraph_graph, mgp_result 
 
 std::vector<double> GetScores(const mgp::Graph& graph, const mg_graph::GraphView<>& graph_view, const std::string& score_prop_name, double default_score) {
     const auto& edges = graph_view.Edges();
-    std::vector<double> scores(edges.size(), default_score);
+    size_t num_edges = edges.size();
+    std::vector<double> scores(num_edges, default_score);
+    if (score_prop_name.empty() && !graph_view.IsWeighted()) {
+        return scores;
+    }
     if (score_prop_name.empty()) {
+        // Default to edge weights
+        for (uint64_t edge_id = 0; edge_id < num_edges; edge_id++) {
+            scores[edge_id] = graph_view.GetWeight(edge_id);
+        }
         return scores;
     }
     for (const auto& relationship : graph.Relationships()) {
@@ -293,7 +276,7 @@ std::vector<double> GetScores(const mgp::Graph& graph, const mg_graph::GraphView
 void IterativeBellmanFordProcedure(mgp_list *args, mgp_graph *memgraph_graph, mgp_result *result, mgp_memory *memory) {
     // Indicies in the arguments list for parameters
     enum ArgIdx : size_t {
-        Source, Target, Params
+        Source, Target, WeightProp, ScoreProp, DefaultWeight, DefaultScore, CullAscending
     };
 
     mgp::MemoryDispatcherGuard mem_guard(memory);
@@ -305,13 +288,11 @@ void IterativeBellmanFordProcedure(mgp_list *args, mgp_graph *memgraph_graph, mg
 
         const auto source_node = arguments[ArgIdx::Source].ValueNode();
         const auto target_node = arguments[ArgIdx::Target].ValueNode();
-        const auto params = arguments[ArgIdx::Params].ValueMap();
-
-        std::string weight_property = MapGetDefaultString(params, "weight_property", "");
-        std::string score_property = MapGetDefaultString(params, "score_property", "");
-        double default_weight = MapGetDefaultDouble(params, "default_weight", 1.0);
-        double default_score = MapGetDefaultDouble(params, "default_score", 1.0);
-        bool cull_ascending = MapGetDefaultBool(params, "cull_ascending", true);
+        const auto weight_property = std::string(arguments[ArgIdx::WeightProp].ValueString());
+        const auto score_property = std::string(arguments[ArgIdx::ScoreProp].ValueString());
+        double default_weight = arguments[ArgIdx::DefaultWeight].ValueDouble();
+        double default_score = arguments[ArgIdx::DefaultScore].ValueDouble();
+        bool cull_ascending = arguments[ArgIdx::CullAscending].ValueBool();
 
         bool weighted = ! weight_property.empty();
         const char * weight_prop_cstr = weighted ? weight_property.c_str() : nullptr;
@@ -408,7 +389,11 @@ extern "C" int mgp_init_module(struct mgp_module *module, struct mgp_memory *mem
             {
                 mgp::Parameter(shortest_paths::kArgumentSourceNode, mgp::Type::Node),
                 mgp::Parameter(shortest_paths::kArgumentTargetNode, mgp::Type::Node),
-                mgp::Parameter(shortest_paths::kArgumentParams, mgp::Type::Map)
+                mgp::Parameter(shortest_paths::kArgumentRelationshipWeightProperty, mgp::Type::String, ""),
+                mgp::Parameter(shortest_paths::kArgumentRelationshipScoreProperty, mgp::Type::String, ""),
+                mgp::Parameter(shortest_paths::kArgumentDefaultWeight, mgp::Type::Double, 1.0),
+                mgp::Parameter(shortest_paths::kArgumentDefaultScore, mgp::Type::Double, 1.0),
+                mgp::Parameter(shortest_paths::kArgumentCullAscending, mgp::Type::Bool, true)
             },
             {
                 mgp::Return(shortest_paths::kReturnSourceNode, mgp::Type::Node),

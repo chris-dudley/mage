@@ -182,7 +182,7 @@ private:
     ) {
         EdgeIdSet ignored_edges = initial_ignored_edges;
 
-        pathfinder.search(graph, source, ignored_edges, ignored_nodes);
+        pathfinder.search(graph, source, ignored_edges, ignored_nodes, check_abort);
 
         while (pathfinder.has_negative_cycle()) {
             check_abort();
@@ -194,26 +194,95 @@ private:
             for (auto cycle_edge_id : cycle.edges) {
                 cycle_edges.emplace_back(cycle_edge_id, edge_scores[cycle_edge_id]);
             }
-            std::make_heap(cycle_edges.begin(), cycle_edges.end(), comparator);
+            std::sort(cycle_edges.begin(), cycle_edges.end(), comparator);
 
+            bool made_progress = false;
             while (!cycle_edges.empty()) {
-                std::pop_heap(cycle_edges.begin(), cycle_edges.end(), comparator);
                 auto current_edge = cycle_edges.back();
                 cycle_edges.pop_back();
 
                 ignored_edges.emplace(current_edge.edge_id);
-                pathfinder.search(graph, source, ignored_edges, ignored_nodes);
+                pathfinder.search(graph, source, ignored_edges, ignored_nodes, check_abort);
 
                 if (pathfinder.has_negative_cycle() || pathfinder.has_path_to(target)) {
                     // We either found a new negative cycle, or removing that edge found us a path to the target.
+                    made_progress = true;
                     break;
                 }
 
                 // Removing that edge broke the path from source to target, have to try again
                 ignored_edges.erase(current_edge.edge_id);
             }
+
+            if (!made_progress) {
+                throw std::logic_error("Unable to break cycle without breaking path to target");
+            }
         }
     }
 };
+
+/// @brief Calculates the shortest path between two nodes using the modified iterative Bellman-Ford algorithm.
+///
+/// The scores will default to the edge weights, with culling in descending order.
+/// An empty path will be returned if there is no path from the source to the target, or if a
+/// negative cycle exists.
+/// @tparam TSize Type of node and edge IDs in the graph.
+/// @param graph The current graph.
+/// @param source_id ID of source node for pathfinding.
+/// @param target_id ID of target node for pathfinding.
+/// @param ignored_edges IDs of edges to ignore during pathfinding.
+/// @param ignored_nodes IDs of nodes to ignore during pathfinding.
+/// @param check_abort Function used to periodically check whether execution should be aborted.
+/// @return The path from source to target, which may be empty if none exists.
+template<typename TSize = std::uint64_t>
+Path<TSize> IterativeBellmanFord(
+    const mg_graph::GraphView<TSize>& graph, TSize source_id, TSize target_id,
+    const std::unordered_set<TSize>& ignored_edges,
+    const std::unordered_set<TSize>& ignored_nodes,
+    CheckAbortFunc check_abort
+) {
+    size_t num_edges = graph.Edges().size();
+    std::vector<double> scores(num_edges, 1.0);
+    if (graph.IsWeighted()) {
+        for (TSize edge_id = 0; edge_id < num_edges; edge_id++) {
+            scores[edge_id] = graph.GetWeight(edge_id);
+        }
+    }
+    IterativeBellmanFordPathfinder<TSize> pathfinder(scores, false);
+    Path<TSize> path = pathfinder.search(graph, source_id, target_id, ignored_edges, ignored_nodes, check_abort);
+    return path;
+}
+
+/// @brief Calculates the shortest path between two nodes using the modified iterative Bellman-Ford algorithm.
+///
+/// An empty path will be returned if there is no path from the source to the target, or if a
+/// negative cycle exists.
+/// @tparam TSize Type of node and edge IDs in the graph.
+/// @param graph The current graph.
+/// @param source_id ID of source node for pathfinding.
+/// @param target_id ID of target node for pathfinding.
+/// @param ignored_edges IDs of edges to ignore during pathfinding.
+/// @param ignored_nodes IDs of nodes to ignore during pathfinding.
+/// @param edge_scores Scores for each edge, used to determine the order to attempt to cull edges.
+/// @param cull_ascending Whether edges should be culled in order of ascending or descending score.
+/// @param check_abort Function used to periodically check whether execution should be aborted.
+/// @return The path from source to target, which may be empty if none exists.
+template<typename TSize = std::uint64_t>
+Path<TSize> IterativeBellmanFord(
+    const mg_graph::GraphView<TSize>& graph, TSize source_id, TSize target_id,
+    const std::unordered_set<TSize>& ignored_edges,
+    const std::unordered_set<TSize>& ignored_nodes,
+    const std::vector<double>& edge_scores,
+    bool cull_ascending,
+    CheckAbortFunc check_abort
+) {
+    size_t num_edges = graph.Edges().size();
+    if (num_edges > edge_scores.size()) {
+        throw std::invalid_argument("Scores not provided for all edges");
+    }
+    IterativeBellmanFordPathfinder<TSize> pathfinder(edge_scores, cull_ascending);
+    Path<TSize> path = pathfinder.search(graph, source_id, target_id, ignored_edges, ignored_nodes, check_abort);
+    return path;
+}
 
 } // namespace shortest_paths

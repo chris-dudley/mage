@@ -15,6 +15,7 @@ constexpr const uint64_t INVALID_NODE = std::numeric_limits<uint64_t>::max();
 constexpr const uint64_t INVALID_EDGE = std::numeric_limits<uint64_t>::max();
 constexpr const double INFINITY = std::numeric_limits<double>::infinity();
 
+void CheckAbortNoop() { }
 
 using NodeAndDistance = std::pair<uint64_t, double>;
 

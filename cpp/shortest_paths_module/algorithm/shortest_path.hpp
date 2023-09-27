@@ -22,7 +22,6 @@ using NodeIdSet = std::unordered_set<uint64_t>;
 ///     and do nothing otherwise.
 using CheckAbortFunc = std::function<void()>;
 
-
 /// @brief Signature for functions that compute the shortest path between two nodes in a graph.
 ///    The two set arguments are sets of edges and nodes to ignore, respectively.
 using ShortestPathFunc = std::function<
@@ -32,6 +31,9 @@ using ShortestPathFunc = std::function<
         CheckAbortFunc
     )
 >;
+
+/// @brief No-op function for passing in to pathfinders when no checking is required.
+void CheckAbortNoop();
 
 /// @brief Computes the shortest path from source to sink using Dijkstra's algorithm.
 /// @param graph Current graph.
