@@ -29,5 +29,6 @@ constexpr const std::string_view kReturnTotalCost = "total_cost";
 constexpr const std::string_view kReturnCosts = "costs";
 constexpr const std::string_view kReturnPath = "path";
 constexpr const std::string_view kReturnNegativeCycle = "negative_cycle";
+constexpr const std::string_view kReturnEdgesRemoved = "edges_removed";
 
 } // namespace shortest_paths

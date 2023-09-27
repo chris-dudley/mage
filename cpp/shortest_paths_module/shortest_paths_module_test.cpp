@@ -741,11 +741,15 @@ TEST(ShortestPaths, IterativeBellmanFordSmallGraphWithNegativeCycle) {
         100.0
     };
 
-    auto path = shortest_paths::IterativeBellmanFord<uint64_t>(*G, 0, 5, {}, {}, edge_scores, true, check_abort_noop);
+    shortest_paths::IterativeBellmanFordPathfinder<uint64_t> pathfinder(edge_scores, true);
+    auto path = pathfinder.search(*G, 0, 5, {}, {}, check_abort_noop);
     ASSERT_EQ(path, expected_path);
+    ASSERT_EQ(pathfinder.edges_removed(), 1);
 
-    path = shortest_paths::IterativeBellmanFord<uint64_t>(*G, 0, 5, {}, {}, edge_scores, false, check_abort_noop);
+    pathfinder.cull_ascending(false);
+    path = pathfinder.search(*G, 0, 5, {}, {}, check_abort_noop);
     ASSERT_EQ(path, expected_path);
+    ASSERT_EQ(pathfinder.edges_removed(), 2);
 }
 
 int main(int argc, char **argv) {
