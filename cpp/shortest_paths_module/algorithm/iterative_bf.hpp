@@ -45,30 +45,40 @@ private:
     /// @brief Whether to cull edges in ascending or descending order.
     bool stored_cull_ascending;
 
+    /// @brief Number of edges that were removed in order to break cycles.
+    size_t num_edges_removed;
+
 public:
     IterativeBellmanFordPathfinder(const Self& other):
         pathfinder(other.pathfinder),
         stored_edge_scores(other.stored_edge_scores),
-        stored_cull_ascending(other.stored_cull_ascending)
+        stored_cull_ascending(other.stored_cull_ascending),
+        num_edges_removed(other.num_edges_removed)
     {}
     IterativeBellmanFordPathfinder(Self&& other):
         pathfinder(std::move(other.pathfinder)),
         stored_edge_scores(std::move(other.stored_edge_scores)),
-        stored_cull_ascending(other.stored_cull_ascending)
+        stored_cull_ascending(other.stored_cull_ascending),
+        num_edges_removed(other.num_edges_removed)
     {}
     Self& operator=(const Self& other) {
         pathfinder = other.pathfinder;
         stored_edge_scores = other.stored_edge_scores;
         stored_cull_ascending = other.stored_cull_ascending;
+        num_edges_removed = other.num_edges_removed;
     }
     Self& operator=(Self&& other) {
         pathfinder = std::move(other.pathfinder);
         stored_edge_scores = std::move(other.stored_edge_scores);
         stored_cull_ascending = other.stored_cull_ascending;
+        num_edges_removed = other.num_edges_removed;
     }
 
     /// @brief Initialize the pathfinder with no scores and the culling order set to ascending.
-    IterativeBellmanFordPathfinder(): pathfinder(), stored_edge_scores(), stored_cull_ascending(true) {}
+    IterativeBellmanFordPathfinder(): 
+        pathfinder(), stored_edge_scores(), stored_cull_ascending(true),
+        num_edges_removed(0)
+    {}
 
     /// @brief Initialize the pathfinder with a set of stored edge scores and culling order.
     /// @param edge_scores The edge scores to store.
@@ -76,7 +86,8 @@ public:
     IterativeBellmanFordPathfinder(const EdgeScoresVec& edge_scores, bool cull_ascending = true):
         pathfinder(),
         stored_edge_scores(edge_scores),
-        stored_cull_ascending(cull_ascending)
+        stored_cull_ascending(cull_ascending),
+        num_edges_removed(0)
     { }
 
     /// @brief Sets the stored edge scores to the specified scores.
@@ -90,6 +101,12 @@ public:
     /// @param ascending If true, cull edges in ascending order of score. If false, in descending order.
     void cull_ascending(bool ascending) {
         stored_cull_ascending = ascending;
+    }
+
+    /// @brief Returns the number of edges that were excluded during pathfinding. Roughly equivalent to
+    /// the number of cycles that were broken.
+    size_t edges_removed() const {
+        return num_edges_removed;
     }
 
     /// @brief Searches the graph for a path from source to target without negative cycles. The previously
@@ -181,6 +198,7 @@ private:
         CheckAbortFunc check_abort
     ) {
         EdgeIdSet ignored_edges = initial_ignored_edges;
+        num_edges_removed = 0;
 
         pathfinder.search(graph, source, ignored_edges, ignored_nodes, check_abort);
 
@@ -207,6 +225,7 @@ private:
                 if (pathfinder.has_negative_cycle() || pathfinder.has_path_to(target)) {
                     // We either found a new negative cycle, or removing that edge found us a path to the target.
                     made_progress = true;
+                    num_edges_removed += 1;
                     break;
                 }
 

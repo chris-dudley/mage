@@ -329,6 +329,10 @@ void IterativeBellmanFordProcedure(mgp_list *args, mgp_graph *memgraph_graph, mg
         record.Insert(std::string(shortest_paths::kReturnTargetNode).c_str(), target_node);
         record.Insert(std::string(shortest_paths::kReturnTotalCost).c_str(), path.total_cost);
         record.Insert(std::string(shortest_paths::kReturnCosts).c_str(), costs);
+        record.Insert(
+            std::string(shortest_paths::kReturnEdgesRemoved).c_str(),
+            static_cast<int64_t>(pathfinder.edges_removed())
+        );
         record.Insert(std::string(shortest_paths::kReturnPath).c_str(), result_path);
     } catch (const std::exception& e) {
         record_factory.SetErrorMessage(e.what());
@@ -400,6 +404,7 @@ extern "C" int mgp_init_module(struct mgp_module *module, struct mgp_memory *mem
                 mgp::Return(shortest_paths::kReturnTargetNode, mgp::Type::Node),
                 mgp::Return(shortest_paths::kReturnTotalCost, mgp::Type::Double),
                 mgp::Return(shortest_paths::kReturnCosts, return_costs_type),
+                mgp::Return(shortest_paths::kReturnEdgesRemoved, mgp::Type::Int),
                 mgp::Return(shortest_paths::kReturnPath, mgp::Type::Path)
             },
             module, memory
