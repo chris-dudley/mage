@@ -8,6 +8,7 @@
 #include "algorithm/shortest_path.hpp"
 #include "algorithm/yens.hpp"
 #include "algorithm/bellman_ford.hpp"
+#include "algorithm/iterative_bf.hpp"
 
 void check_abort_noop() {}
 
@@ -511,7 +512,7 @@ TEST(ShortestPaths, YensComplexGraph) {
 TEST(ShortestPaths, BellmanFordEmptyGraph) {
     auto G = mg_generate::BuildGraph(0, {});
 
-    auto path = shortest_paths::BellmanFord<uint64_t>(*G, 0, 0, {}, {});
+    auto path = shortest_paths::BellmanFord<uint64_t>(*G, 0, 0, {}, {}, check_abort_noop);
 
     ASSERT_TRUE(path.empty());
 }
@@ -519,7 +520,7 @@ TEST(ShortestPaths, BellmanFordEmptyGraph) {
 TEST(ShortestPaths, BellmanFordSingleNode) {
     auto G = mg_generate::BuildGraph(1, {});
 
-    auto path = shortest_paths::BellmanFord<uint64_t>(*G, 0, 0, {}, {});
+    auto path = shortest_paths::BellmanFord<uint64_t>(*G, 0, 0, {}, {}, check_abort_noop);
 
     ASSERT_TRUE(path.empty());
 }
@@ -527,7 +528,7 @@ TEST(ShortestPaths, BellmanFordSingleNode) {
 TEST(ShortestPaths, BellmanFordDisconnectedNodes) {
     auto G = mg_generate::BuildGraph(10, {});
 
-    auto path = shortest_paths::BellmanFord<uint64_t>(*G, 0, 9, {}, {});
+    auto path = shortest_paths::BellmanFord<uint64_t>(*G, 0, 9, {}, {}, check_abort_noop);
 
     ASSERT_TRUE(path.empty());
 }
@@ -629,6 +630,122 @@ TEST(ShortestPaths, BellmanFordSmallGraphWithNegativeCycle) {
     ASSERT_EQ(cycle.edges, expected_cycle.edges);
     ASSERT_EQ(cycle.costs, expected_cycle.costs);
     ASSERT_EQ(cycle.total_cost, expected_cycle.total_cost);
+}
+
+TEST(ShortestPaths, IterativeBellmanFordEmptyGraph) {
+    auto G = mg_generate::BuildGraph(0, {});
+
+    auto path = shortest_paths::IterativeBellmanFord<uint64_t>(*G, 0, 0, {}, {}, check_abort_noop);
+
+    ASSERT_TRUE(path.empty());
+}
+
+TEST(ShortestPaths, IterativeBellmanFordSingleNode) {
+    auto G = mg_generate::BuildGraph(1, {});
+
+    auto path = shortest_paths::IterativeBellmanFord<uint64_t>(*G, 0, 0, {}, {}, check_abort_noop);
+
+    ASSERT_TRUE(path.empty());
+}
+
+TEST(ShortestPaths, IterativeBellmanFordDisconnectedNodes) {
+    auto G = mg_generate::BuildGraph(10, {});
+
+    auto path = shortest_paths::IterativeBellmanFord<uint64_t>(*G, 0, 9, {}, {}, check_abort_noop);
+
+    ASSERT_TRUE(path.empty());
+}
+
+/*
+ *                  ┌─────────────10───────────────┐
+ *                ┌─▼─┐                          ┌─┴─┐
+ *   ┌──50───────►│ 2 ├─────────┬────────80─────►│ 4 │
+ *   │            └───┘         │                └▲─┬┘
+ *   │                         40                 │ │
+ *   │                          │                 │ 40
+ * ┌─┴─┐                       ┌▼──┐              │ │
+ * │ 0 ├────────100───────────►│ 3 ├──┬──30───────┘ │
+ * └─┬─┘                       └▲──┘  │             │
+ *   │                          │     │          ┌──▼┐
+ *   │                         40     └──80─────►│ 5 │
+ *   │                          │                └───┘
+ *   │            ┌───┐         │
+ *   └──50───────►│ 1 ├─────────┘
+ *                └───┘
+ */
+TEST(ShortestPaths, IterativeBellmanFordSmallGraphWithCycle) {
+    size_t NUM_VERTEX = 6;
+    auto G = mg_generate::BuildWeightedGraph(
+        NUM_VERTEX,
+        {
+            /* 0*/ {{0, 1}, 50.0}, /* 1*/ {{0, 2}, 50.0}, /* 2*/ {{0, 3}, 100.0},
+            /* 3*/ {{1, 3}, 40.0},
+            /* 4*/ {{2, 3}, 40.0}, /* 5*/ {{2, 4}, 80.0},
+            /* 6*/ {{3, 4}, 30.0}, /* 7*/ {{3, 5}, 80.0},
+            /* 8*/ {{4, 5}, 40.0},
+            // new edges
+            /* 9*/ {{4, 2}, 10.0},
+        },
+        mg_graph::GraphType::kDirectedGraph
+    );
+    shortest_paths::Path<> expected_path = {{0, 1, 3, 4, 5}, {0, 3, 6, 8}, {0.0, 50.0, 90.0, 120.0, 160.0}, 160.0};
+
+    auto path = shortest_paths::IterativeBellmanFord<uint64_t>(*G, 0, 5, {}, {}, check_abort_noop);
+    ASSERT_EQ(path, expected_path);
+}
+
+/*
+ *                  ┌─────────── -100 ─────────────┐
+ *                ┌─▼─┐                          ┌─┴─┐
+ *   ┌──50───────►│ 2 ├─────────┬────────80─────►│ 4 │
+ *   │            └───┘         │                └▲─┬┘
+ *   │                         40                 │ │
+ *   │                          │                 │ 40
+ * ┌─┴─┐                       ┌▼──┐              │ │
+ * │ 0 ├────────100───────────►│ 3 ├──┬─-30───────┘ │
+ * └─┬─┘                       └▲──┘  │             │
+ *   │                          │     │          ┌──▼┐
+ *   │                         40     └──80─────►│ 5 │
+ *   │                          │                └───┘
+ *   │            ┌───┐         │
+ *   └──50───────►│ 1 ├─────────┘
+ *                └───┘
+ */
+TEST(ShortestPaths, IterativeBellmanFordSmallGraphWithNegativeCycle) {
+    auto G = mg_generate::BuildWeightedGraph(
+        6,
+        {
+            /* 0*/ {{0, 1}, 50.0}, /* 1*/ {{0, 2}, 50.0}, /* 2*/ {{0, 3}, 100.0},
+            /* 3*/ {{1, 3}, 40.0},
+            /* 4*/ {{2, 3}, 40.0}, /* 5*/ {{2, 4}, 80.0},
+            /* 6*/ {{3, 4}, -30.0}, /* 7*/ {{3, 5}, 80.0},
+            /* 8*/ {{4, 5}, 40.0},
+            // new edges
+            /* 9*/ {{4, 2}, -100.0},
+        },
+        mg_graph::GraphType::kDirectedGraph
+    );
+    std::vector<double> edge_scores;
+    for (const auto& edge : G->Edges()) {
+        edge_scores.push_back(G->GetWeight(edge.id));
+    }
+
+    // Should end up with the same path regardless of order.
+    // For ascending, it should remove the -100 edge, which breaks the cycle.
+    // For descending, it should remove both positive edges leading out of node 2, which makes
+    // the -100 edge unusable, which also breaks the cycle.
+    shortest_paths::Path<> expected_path{
+        {0, 1, 3, 4, 5},
+        {0, 3, 6, 8},
+        {0.0, 50.0, 90.0, 60.0, 100.0},
+        100.0
+    };
+
+    auto path = shortest_paths::IterativeBellmanFord<uint64_t>(*G, 0, 5, {}, {}, edge_scores, true, check_abort_noop);
+    ASSERT_EQ(path, expected_path);
+
+    path = shortest_paths::IterativeBellmanFord<uint64_t>(*G, 0, 5, {}, {}, edge_scores, false, check_abort_noop);
+    ASSERT_EQ(path, expected_path);
 }
 
 int main(int argc, char **argv) {
