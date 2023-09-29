@@ -5,12 +5,11 @@
 namespace shortest_paths {
 
 constexpr const std::string_view kProcedureYens = "yens";
-constexpr const std::string_view kProcedureYensSubgraph = "yens_subgraph";
 constexpr const std::string_view kProcedureBellmanFord = "bellman_ford";
-constexpr const std::string_view kProcedureIterativeBellmanFord = "iterative_bellman_ford";
+constexpr const std::string_view kProcedureIterativeBellmanFordTargeted = "iterative_bellman_ford_targeted";
+constexpr const std::string_view kProcedureIterativeBellmanFordSssp = "iterative_bellman_ford_sssp";
+constexpr const std::string_view kProcedureIterativeBellmanFordSubgraph = "iterative_bellman_ford_subgraph";
 
-constexpr const std::string_view kArgumentSubgraphNodes = "subgraph_nodes";
-constexpr const std::string_view kArgumentSubgraphEdges = "subgraph_edges";
 constexpr const std::string_view kArgumentSourceNode = "source_node";
 constexpr const std::string_view kArgumentTargetNode = "target_node";
 constexpr const std::string_view kArgumentTargetNodes = "target_nodes";
@@ -29,6 +28,9 @@ constexpr const std::string_view kReturnTotalCost = "total_cost";
 constexpr const std::string_view kReturnCosts = "costs";
 constexpr const std::string_view kReturnPath = "path";
 constexpr const std::string_view kReturnNegativeCycle = "negative_cycle";
-constexpr const std::string_view kReturnEdgesRemoved = "edges_removed";
+constexpr const std::string_view kReturnNumEdgesRemoved = "num_edges_removed";
+constexpr const std::string_view kReturnRemovedEdges = "removed_edges";
+constexpr const std::string_view kReturnNodes = "nodes";
+constexpr const std::string_view kReturnEdges = "edges";
 
 } // namespace shortest_paths

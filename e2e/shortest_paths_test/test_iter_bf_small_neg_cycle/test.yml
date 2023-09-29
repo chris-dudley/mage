@@ -1,6 +1,6 @@
 query: >-
     MATCH (source:Node {id: 0}), (target:Node {id: 5})
-    CALL shortest_paths.iterative_bellman_ford(source, target, 'weight')
+    CALL shortest_paths.iterative_bellman_ford_targeted(source, target, 'weight')
     YIELD
       source_node,
       target_node,
