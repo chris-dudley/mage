@@ -15,8 +15,13 @@ public:
     using GraphViewType = mg_graph::GraphView<TSize>;
     using Self = BellmanFordPathfinder<TSize>;
     using EdgeIdSet = std::unordered_set<TSize>;
+    using EdgeIdVec = std::vector<TSize>;
     using NodeIdSet = std::unordered_set<TSize>;
+    using NodeIdVec = std::vector<TSize>;
     using EdgeScoresVec = std::vector<double>;
+
+    using BFPathfinder = BellmanFordPathfinder<TSize>;
+    using PredecessorVec = BFPathfinder::PredecessorVec;
 
 private:
     struct ScoredEdge {
@@ -33,7 +38,6 @@ private:
     };
 
     using ScoreComparator = std::function<bool(const ScoredEdge&, const ScoredEdge&)>;
-    using BFPathfinder = BellmanFordPathfinder<TSize>;
 
     /// @brief Bellman-Ford pathfinder.
     BFPathfinder pathfinder;
@@ -45,39 +49,39 @@ private:
     /// @brief Whether to cull edges in ascending or descending order.
     bool stored_cull_ascending;
 
-    /// @brief Number of edges that were removed in order to break cycles.
-    size_t num_edges_removed;
+    /// @brief IDs of edges removed from the graph to break cycles
+    EdgeIdVec _removed_edges;
 
 public:
     IterativeBellmanFordPathfinder(const Self& other):
         pathfinder(other.pathfinder),
         stored_edge_scores(other.stored_edge_scores),
         stored_cull_ascending(other.stored_cull_ascending),
-        num_edges_removed(other.num_edges_removed)
+        _removed_edges(other._removed_edges)
     {}
     IterativeBellmanFordPathfinder(Self&& other):
         pathfinder(std::move(other.pathfinder)),
         stored_edge_scores(std::move(other.stored_edge_scores)),
         stored_cull_ascending(other.stored_cull_ascending),
-        num_edges_removed(other.num_edges_removed)
+        _removed_edges(std::move(other._removed_edges))
     {}
     Self& operator=(const Self& other) {
         pathfinder = other.pathfinder;
         stored_edge_scores = other.stored_edge_scores;
         stored_cull_ascending = other.stored_cull_ascending;
-        num_edges_removed = other.num_edges_removed;
+        _removed_edges = other._removed_edges;
     }
     Self& operator=(Self&& other) {
         pathfinder = std::move(other.pathfinder);
         stored_edge_scores = std::move(other.stored_edge_scores);
         stored_cull_ascending = other.stored_cull_ascending;
-        num_edges_removed = other.num_edges_removed;
+        _removed_edges = std::move(other._removed_edges);
     }
 
     /// @brief Initialize the pathfinder with no scores and the culling order set to ascending.
     IterativeBellmanFordPathfinder(): 
         pathfinder(), stored_edge_scores(), stored_cull_ascending(true),
-        num_edges_removed(0)
+        _removed_edges()
     {}
 
     /// @brief Initialize the pathfinder with a set of stored edge scores and culling order.
@@ -87,7 +91,7 @@ public:
         pathfinder(),
         stored_edge_scores(edge_scores),
         stored_cull_ascending(cull_ascending),
-        num_edges_removed(0)
+        _removed_edges()
     { }
 
     /// @brief Sets the stored edge scores to the specified scores.
@@ -105,8 +109,55 @@ public:
 
     /// @brief Returns the number of edges that were excluded during pathfinding. Roughly equivalent to
     /// the number of cycles that were broken.
-    size_t edges_removed() const {
-        return num_edges_removed;
+    size_t num_edges_removed() const {
+        return _removed_edges.size();
+    }
+
+    /// @brief Returns the IDs of edges removed from the graph during pathfinding to break cycles.
+    const EdgeIdVec& removed_edges() const {
+        return _removed_edges;
+    }
+
+    /// @brief Returns the number of reachable nodes in the graph, including the source.
+    size_t num_reachable_nodes() const {
+        return pathfinder.num_reachable_nodes();
+    }
+
+    /// @brief Returns the set of nodes that are the source or reachable from the source.
+    NodeIdVec reachable_nodes() const {
+        return pathfinder.reachable_nodes();
+    }
+
+    /// @brief Returns the set of edges used to traverse the minimum-weighted paths to reachable nodes.
+    /// If the graph has a negative cycle, the returned edges are not guaranteed to contain all edges needed
+    /// to reach all nodes.
+    EdgeIdVec edges_used() const {
+        return pathfinder.edges_used();
+    }
+
+    /// @brief Returns whether a path from the source to the specified vertex exists.
+    /// @param vertex The ID of the destination vertex.
+    bool has_path_to(TSize vertex) const {
+        return pathfinder.has_path_to(vertex);
+    }
+
+    /// @brief Returns the lowest-cost path from the source to the specified vertex, if one exists.
+    /// @param vertex The destination vertex.
+    /// @return The found path, or an empty path if no path exists.
+    /// @throws std::logic_error if a negative cycle exists.
+    Path<TSize> path_to(TSize vertex) const {
+        return pathfinder.path_to(vertex);
+    }
+
+    /// @brief Returns a vector containing the predecessor edges for each vertex.
+    ///
+    /// For each vertex `v`, `predecessors[v]` will either be empty or contain information about
+    /// the edge leading into `v` in the minimum-weight predecessor tree constructed by Bellman-Ford.
+    ///
+    /// If `predecessors[v]` has no value, that vertex is not reachable from the source.
+    /// @return The predecessors vector.
+    const PredecessorVec& predecessors() const {
+        return pathfinder.predecessors();
     }
 
     /// @brief Searches the graph for a path from source to target without negative cycles. The previously
@@ -125,31 +176,17 @@ public:
         const EdgeIdSet& initial_ignored_edges, const NodeIdSet& ignored_nodes,
         CheckAbortFunc check_abort
     ) {
-        Path<TSize> result(source);
-        if (source == target) {
-            return result;
-        }
-
-        auto num_edges = graph.Edges().size();
-        if (num_edges > stored_edge_scores.size()) {
-            throw std::invalid_argument("Scores not available for all edges in graph");
-        }
-
-        ScoreComparator comparator = stored_cull_ascending ? ScoredEdge::greater : ScoredEdge::less;
-        do_search(
+        return search(
             graph, source, target,
             initial_ignored_edges, ignored_nodes,
-            stored_edge_scores, comparator, check_abort
+            stored_edge_scores, stored_cull_ascending,
+            check_abort
         );
-
-        if (pathfinder.has_path_to(target)) {
-            result = pathfinder.path_to(target);
-        }
-        return result;
     }
 
-    /// @brief Searches the graph for a path from source to target without negative cycles. Will use the
-    /// given edge scores and culling order to remove edges if negative cycles are encountered.
+    /// @brief Searches the graph for a path from source to target without negative cycles.
+    ///
+    /// Will use the given edge scores and culling order to remove edges if negative cycles are encountered.
     /// @param graph The graph to operate on.
     /// @param source The ID of the source node.
     /// @param target The ID of the target node.
@@ -176,12 +213,11 @@ public:
         if (num_edges > edge_scores.size()) {
             throw std::invalid_argument("Scores not available for all edges in graph");
         }
-        ScoreComparator comparator = cull_ascending ? ScoredEdge::greater : ScoredEdge::less;
 
         do_search(
             graph, source, target,
             initial_ignored_edges, ignored_nodes,
-            edge_scores, comparator, check_abort
+            edge_scores, cull_ascending, check_abort
         );
 
         if (pathfinder.has_path_to(target)) {
@@ -190,17 +226,76 @@ public:
         return result;
     }
 
+    /// @brief Constructs paths from the source node to all reachable nodes, while removing cycles.
+    ///
+    /// The previously stored edge scores and culling order will be used to determine which edges to
+    /// remove.
+    /// @param graph The graph to operate on.
+    /// @param source The ID of the source node.
+    /// @param initial_ignored_edges Initial set of edges to ignore, if any.
+    /// @param ignored_nodes Set of nodes to ignore during pathfinding.
+    /// @param check_abort Function used to checked periodically whether execution should be aborted.
+    /// @throws std::invalid_argument If the stored edge scores do not contain scores for all edges in the
+    /// graph.
+    void remove_cycles(
+        const GraphViewType& graph, TSize source,
+        const EdgeIdSet& initial_ignored_edges, const NodeIdSet& ignored_nodes,
+        CheckAbortFunc check_abort
+    ) {
+        remove_cycles(
+            graph, source,
+            initial_ignored_edges, ignored_nodes,
+            stored_edge_scores, stored_cull_ascending,
+            check_abort
+        );
+    }
+
+    /// @brief Constructs paths from the source node to all reachable nodes, while removing cycles.
+    ///
+    /// Will use the given edge scores and culling order to remove edges if negative cycles are encountered.
+    /// @param graph The graph to operate on.
+    /// @param source The ID of the source node.
+    /// @param initial_ignored_edges Initial set of edges to ignore, if any.
+    /// @param ignored_nodes Set of nodes to ignore during pathfinding.
+    /// @param edge_scores The scores for each edge to be used when removing edges in negative cycles.
+    /// @param cull_ascending Whether culling is performed in ascending or descending order of score.
+    /// @param check_abort Function used to checked periodically whether execution should be aborted.
+    /// @throws std::invalid_argument If the stored edge scores do not contain scores for all edges in the
+    /// graph.
+    void remove_cycles(
+        const GraphViewType& graph, TSize source,
+        const EdgeIdSet& initial_ignored_edges, const NodeIdSet& ignored_nodes,
+        const EdgeScoresVec& edge_scores, bool cull_ascending,
+        CheckAbortFunc check_abort
+    ) {
+        auto num_edges = graph.Edges().size();
+        if (num_edges > edge_scores.size()) {
+            throw std::invalid_argument("Scores not available for all edges in graph");
+        }
+        do_search_no_target(
+            graph, source,
+            initial_ignored_edges, ignored_nodes,
+            edge_scores, cull_ascending,
+            check_abort
+        );
+    }
+
 private:
     void do_search(
         const GraphViewType& graph, TSize source, TSize target,
         const EdgeIdSet& initial_ignored_edges, const NodeIdSet& ignored_nodes,
-        const EdgeScoresVec& edge_scores, ScoreComparator comparator,
+        const EdgeScoresVec& edge_scores, bool cull_ascending,
         CheckAbortFunc check_abort
     ) {
+        ScoreComparator comparator = cull_ascending ? ScoredEdge::greater : ScoredEdge::less;
         EdgeIdSet ignored_edges = initial_ignored_edges;
-        num_edges_removed = 0;
+        _removed_edges.clear();
 
         pathfinder.search(graph, source, ignored_edges, ignored_nodes, check_abort);
+        if (!pathfinder.has_path_to(target)) {
+            // No path exists to target
+            return;
+        }
 
         while (pathfinder.has_negative_cycle()) {
             check_abort();
@@ -225,7 +320,7 @@ private:
                 if (pathfinder.has_negative_cycle() || pathfinder.has_path_to(target)) {
                     // We either found a new negative cycle, or removing that edge found us a path to the target.
                     made_progress = true;
-                    num_edges_removed += 1;
+                    _removed_edges.push_back(current_edge.edge_id);
                     break;
                 }
 
@@ -236,6 +331,40 @@ private:
             if (!made_progress) {
                 throw std::logic_error("Unable to break cycle without breaking path to target");
             }
+        }
+    }
+
+    void do_search_no_target(
+        const GraphViewType& graph, TSize source,
+        const EdgeIdSet& initial_ignored_edges, const NodeIdSet& ignored_nodes,
+        const EdgeScoresVec& edge_scores, bool cull_ascending,
+        CheckAbortFunc check_abort
+    ) {
+        // Returns true if lhs is worse than rhs
+        ScoreComparator worse_than = cull_ascending ? ScoredEdge::greater : ScoredEdge::less;
+
+        EdgeIdSet ignored_edges = initial_ignored_edges;
+        _removed_edges.clear();
+
+        pathfinder.search(graph, source, ignored_edges, ignored_nodes, check_abort);
+
+        while (pathfinder.has_negative_cycle()) {
+            check_abort();
+
+            auto cycle = pathfinder.negative_cycle().value();
+
+            ScoredEdge current_edge(cycle.edges[0], edge_scores[cycle.edges[0]]);
+            for (size_t i = 1; i < cycle.edges.size(); i++) {
+                ScoredEdge next_edge(cycle.edges[i], edge_scores[cycle.edges[i]]);
+                if (worse_than(current_edge, next_edge)) {
+                    current_edge = next_edge;
+                }
+            }
+
+            ignored_edges.emplace(current_edge.edge_id);
+            _removed_edges.push_back(current_edge.edge_id);
+
+            pathfinder.search(graph, source, ignored_edges, ignored_nodes, check_abort);
         }
     }
 };

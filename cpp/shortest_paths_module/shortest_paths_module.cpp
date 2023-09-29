@@ -203,11 +203,7 @@ void BellmanFordProcedure(mgp_list *args, mgp_graph *memgraph_graph, mgp_result 
         std::vector<uint64_t> targets;
         if (target_nodes.Empty()) {
             // If no targets specified, return paths to all reachable nodes
-            for (auto node : graph_view.Nodes()) {
-                if (node.id != source_id && pathfinder.has_path_to(node.id)) {
-                    targets.push_back(node.id);
-                }
-            }
+            targets = pathfinder.reachable_nodes();
         } else {
             for (auto target_nodes_elem : target_nodes ) {
                 auto target_node = target_nodes_elem.ValueNode();
@@ -285,7 +281,6 @@ void IterativeBellmanFordProcedure(mgp_list *args, mgp_graph *memgraph_graph, mg
     const auto arguments = mgp::List(args);
     const auto record_factory = mgp::RecordFactory(result);
     try {
-
         const auto source_node = arguments[ArgIdx::Source].ValueNode();
         const auto target_node = arguments[ArgIdx::Target].ValueNode();
         const auto weight_property = std::string(arguments[ArgIdx::WeightProp].ValueString());
@@ -330,10 +325,172 @@ void IterativeBellmanFordProcedure(mgp_list *args, mgp_graph *memgraph_graph, mg
         record.Insert(std::string(shortest_paths::kReturnTotalCost).c_str(), path.total_cost);
         record.Insert(std::string(shortest_paths::kReturnCosts).c_str(), costs);
         record.Insert(
-            std::string(shortest_paths::kReturnEdgesRemoved).c_str(),
-            static_cast<int64_t>(pathfinder.edges_removed())
+            std::string(shortest_paths::kReturnNumEdgesRemoved).c_str(),
+            static_cast<int64_t>(pathfinder.num_edges_removed())
         );
         record.Insert(std::string(shortest_paths::kReturnPath).c_str(), result_path);
+    } catch (const std::exception& e) {
+        record_factory.SetErrorMessage(e.what());
+        return;
+    }
+}
+
+void IBF_SSSP(mgp_list *args, mgp_graph *memgraph_graph, mgp_result *result, mgp_memory *memory) {
+    // Indicies in the arguments list for parameters
+    enum ArgIdx : size_t {
+        Source, Targets, WeightProp, ScoreProp, DefaultWeight, DefaultScore, CullAscending
+    };
+    mgp::MemoryDispatcherGuard mem_guard(memory);
+    mgp::Graph graph{memgraph_graph};
+
+    const auto arguments = mgp::List(args);
+    const auto record_factory = mgp::RecordFactory(result);
+    try {
+        const auto source_node = arguments[ArgIdx::Source].ValueNode();
+        const auto target_nodes = arguments[ArgIdx::Targets].ValueList();
+        const auto weight_property = std::string(arguments[ArgIdx::WeightProp].ValueString());
+        const auto score_property = std::string(arguments[ArgIdx::ScoreProp].ValueString());
+        double default_weight = arguments[ArgIdx::DefaultWeight].ValueDouble();
+        double default_score = arguments[ArgIdx::DefaultScore].ValueDouble();
+        bool cull_ascending = arguments[ArgIdx::CullAscending].ValueBool();
+
+        bool weighted = ! weight_property.empty();
+        const char * weight_prop_cstr = weighted ? weight_property.c_str() : nullptr;
+
+        auto graph_view_ptr = mg_utility::GetGraphView(
+            memgraph_graph, result, memory, mg_graph::GraphType::kDirectedGraph,
+            weighted, weight_prop_cstr, default_weight
+        );
+        const mg_graph::GraphView<>& graph_view = *graph_view_ptr;
+
+        std::vector<double> scores = GetScores(graph, graph_view, score_property, default_score);
+
+        const auto source_mgid = source_node.Id().AsUint();
+        const auto source_id = GetInnerNodeId(graph_view, source_mgid);
+        auto abort_func = [&graph] () { graph.CheckMustAbort(); };
+
+        shortest_paths::IterativeBellmanFordPathfinder<uint64_t> pathfinder(scores, cull_ascending);
+        pathfinder.remove_cycles(graph_view, source_id, {}, {}, abort_func);
+
+        std::vector<uint64_t> targets;
+        if (target_nodes.Empty()) {
+            targets = pathfinder.reachable_nodes();
+        } else {
+            for (auto target_nodes_elem : target_nodes) {
+                auto target_node = target_nodes_elem.ValueNode();
+                auto node_id = GetInnerNodeId(graph_view, target_node.Id().AsUint());
+                if (pathfinder.has_path_to(node_id)) {
+                    targets.push_back(node_id);
+                }
+            }
+        }
+
+        for (auto target_id : targets) {
+            if (target_id == source_id) continue;
+
+            auto target_mgid = GetMemgraphNodeId(graph_view, target_id);
+
+            auto path = pathfinder.path_to(target_id);
+            if (path.empty()) continue;
+
+            mgp::Node target_node = graph.GetNodeById(mgp::Id::FromUint(target_mgid));
+            mgp::Path result_path = TranslatePath(graph, graph_view, path);
+            mgp::List costs(path.costs.size()); // accumulated cost at each node
+            for (auto cost : path.costs) {
+                costs.Append(mgp::Value(cost));
+            }
+
+            auto record = record_factory.NewRecord();
+            record.Insert(std::string(shortest_paths::kReturnSourceNode).c_str(), source_node);
+            record.Insert(std::string(shortest_paths::kReturnTargetNode).c_str(), target_node);
+            record.Insert(std::string(shortest_paths::kReturnTotalCost).c_str(), path.total_cost);
+            record.Insert(std::string(shortest_paths::kReturnCosts).c_str(), costs);
+            record.Insert(std::string(shortest_paths::kReturnPath).c_str(), result_path);
+        }
+    } catch (const std::exception& e) {
+        record_factory.SetErrorMessage(e.what());
+        return;
+    }
+}
+
+
+void IBF_SSSP_Subgraph(mgp_list *args, mgp_graph *memgraph_graph, mgp_result *result, mgp_memory *memory) {
+    // Indicies in the arguments list for parameters
+    enum ArgIdx : size_t {
+        Source, WeightProp, ScoreProp, DefaultWeight, DefaultScore, CullAscending
+    };
+    mgp::MemoryDispatcherGuard mem_guard(memory);
+    mgp::Graph graph{memgraph_graph};
+
+    const auto arguments = mgp::List(args);
+    const auto record_factory = mgp::RecordFactory(result);
+    try {
+        const auto source_node = arguments[ArgIdx::Source].ValueNode();
+        const auto weight_property = std::string(arguments[ArgIdx::WeightProp].ValueString());
+        const auto score_property = std::string(arguments[ArgIdx::ScoreProp].ValueString());
+        double default_weight = arguments[ArgIdx::DefaultWeight].ValueDouble();
+        double default_score = arguments[ArgIdx::DefaultScore].ValueDouble();
+        bool cull_ascending = arguments[ArgIdx::CullAscending].ValueBool();
+
+        bool weighted = ! weight_property.empty();
+        const char * weight_prop_cstr = weighted ? weight_property.c_str() : nullptr;
+
+        auto graph_view_ptr = mg_utility::GetGraphView(
+            memgraph_graph, result, memory, mg_graph::GraphType::kDirectedGraph,
+            weighted, weight_prop_cstr, default_weight
+        );
+        const mg_graph::GraphView<>& graph_view = *graph_view_ptr;
+
+        std::vector<double> scores = GetScores(graph, graph_view, score_property, default_score);
+
+        const auto source_mgid = source_node.Id().AsUint();
+        const auto source_id = GetInnerNodeId(graph_view, source_mgid);
+        auto abort_func = [&graph] () { graph.CheckMustAbort(); };
+
+        shortest_paths::IterativeBellmanFordPathfinder<uint64_t> pathfinder(scores, cull_ascending);
+        pathfinder.remove_cycles(graph_view, source_id, {}, {}, abort_func);
+
+        // Add all reachable nodes to result set
+        const auto reachable_node_ids = pathfinder.reachable_nodes();
+        mgp::List result_nodes(reachable_node_ids.size());
+        for (auto node_id : reachable_node_ids) {
+            auto mgid = mgp::Id::FromUint(GetMemgraphNodeId(graph_view, node_id));
+            result_nodes.Append(mgp::Value(graph.GetNodeById(mgid)));
+        }
+
+        // Set up sets of memgraph IDs for included and removed edges, so we can more easily check for inclusion
+        // in either set while iterating over the edges.
+        auto edge_ids_used = pathfinder.edges_used();
+        auto removed_edge_ids = pathfinder.removed_edges();
+        std::unordered_set<uint64_t> edges_used_mgid_set;
+        std::unordered_set<uint64_t> removed_edges_mgid_set;
+        edges_used_mgid_set.reserve(edge_ids_used.size());
+        removed_edges_mgid_set.reserve(removed_edge_ids.size());
+
+        for (auto edge_id : edge_ids_used) {
+            edges_used_mgid_set.emplace(GetMemgraphEdgeId(graph_view, edge_id));
+        }
+        for (auto edge_id : removed_edge_ids) {
+            removed_edges_mgid_set.emplace(GetMemgraphEdgeId(graph_view, edge_id));
+        }
+
+        mgp::List result_edges(edges_used_mgid_set.size());
+        mgp::List result_removed_edges(removed_edges_mgid_set.size());
+
+        for (const auto& edge : graph.Relationships()) {
+            auto edge_mgid = edge.Id().AsUint();
+            if (edges_used_mgid_set.contains(edge_mgid)) {
+                result_edges.Append(mgp::Value(edge));
+            } else if (removed_edges_mgid_set.contains(edge_mgid)) {
+                result_removed_edges.Append(mgp::Value(edge));
+            }
+        }
+
+        auto record = record_factory.NewRecord();
+        record.Insert(std::string(shortest_paths::kReturnNodes).c_str(), result_nodes);
+        record.Insert(std::string(shortest_paths::kReturnEdges).c_str(), result_edges);
+        record.Insert(std::string(shortest_paths::kReturnNumEdgesRemoved).c_str(), static_cast<int64_t>(removed_edges_mgid_set.size()));
+        record.Insert(std::string(shortest_paths::kReturnRemovedEdges).c_str(), result_removed_edges);
     } catch (const std::exception& e) {
         record_factory.SetErrorMessage(e.what());
         return;
@@ -389,7 +546,7 @@ extern "C" int mgp_init_module(struct mgp_module *module, struct mgp_memory *mem
         );
 
         mgp::AddProcedure(
-            IterativeBellmanFordProcedure, shortest_paths::kProcedureIterativeBellmanFord, mgp::ProcedureType::Read,
+            IterativeBellmanFordProcedure, shortest_paths::kProcedureIterativeBellmanFordTargeted, mgp::ProcedureType::Read,
             {
                 mgp::Parameter(shortest_paths::kArgumentSourceNode, mgp::Type::Node),
                 mgp::Parameter(shortest_paths::kArgumentTargetNode, mgp::Type::Node),
@@ -404,8 +561,48 @@ extern "C" int mgp_init_module(struct mgp_module *module, struct mgp_memory *mem
                 mgp::Return(shortest_paths::kReturnTargetNode, mgp::Type::Node),
                 mgp::Return(shortest_paths::kReturnTotalCost, mgp::Type::Double),
                 mgp::Return(shortest_paths::kReturnCosts, return_costs_type),
-                mgp::Return(shortest_paths::kReturnEdgesRemoved, mgp::Type::Int),
+                mgp::Return(shortest_paths::kReturnNumEdgesRemoved, mgp::Type::Int),
                 mgp::Return(shortest_paths::kReturnPath, mgp::Type::Path)
+            },
+            module, memory
+        );
+
+        mgp::AddProcedure(
+            IBF_SSSP, shortest_paths::kProcedureIterativeBellmanFordSssp, mgp::ProcedureType::Read,
+            {
+                mgp::Parameter(shortest_paths::kArgumentSourceNode, mgp::Type::Node),
+                mgp::Parameter(shortest_paths::kArgumentTargetNodes, {mgp::Type::List, mgp::Type::Node}, empty_list),
+                mgp::Parameter(shortest_paths::kArgumentRelationshipWeightProperty, mgp::Type::String, ""),
+                mgp::Parameter(shortest_paths::kArgumentRelationshipScoreProperty, mgp::Type::String, ""),
+                mgp::Parameter(shortest_paths::kArgumentDefaultWeight, mgp::Type::Double, 1.0),
+                mgp::Parameter(shortest_paths::kArgumentDefaultScore, mgp::Type::Double, 1.0),
+                mgp::Parameter(shortest_paths::kArgumentCullAscending, mgp::Type::Bool, true)
+            },
+            {
+                mgp::Return(shortest_paths::kReturnSourceNode, mgp::Type::Node),
+                mgp::Return(shortest_paths::kReturnTargetNode, mgp::Type::Node),
+                mgp::Return(shortest_paths::kReturnTotalCost, mgp::Type::Double),
+                mgp::Return(shortest_paths::kReturnCosts, return_costs_type),
+                mgp::Return(shortest_paths::kReturnPath, mgp::Type::Path)
+            },
+            module, memory
+        );
+
+        mgp::AddProcedure(
+            IBF_SSSP_Subgraph, shortest_paths::kProcedureIterativeBellmanFordSubgraph, mgp::ProcedureType::Read,
+            {
+                mgp::Parameter(shortest_paths::kArgumentSourceNode, mgp::Type::Node),
+                mgp::Parameter(shortest_paths::kArgumentRelationshipWeightProperty, mgp::Type::String, ""),
+                mgp::Parameter(shortest_paths::kArgumentRelationshipScoreProperty, mgp::Type::String, ""),
+                mgp::Parameter(shortest_paths::kArgumentDefaultWeight, mgp::Type::Double, 1.0),
+                mgp::Parameter(shortest_paths::kArgumentDefaultScore, mgp::Type::Double, 1.0),
+                mgp::Parameter(shortest_paths::kArgumentCullAscending, mgp::Type::Bool, true)
+            },
+            {
+                mgp::Return(shortest_paths::kReturnNodes, {mgp::Type::List, mgp::Type::Node}),
+                mgp::Return(shortest_paths::kReturnEdges, {mgp::Type::List, mgp::Type::Relationship}),
+                mgp::Return(shortest_paths::kReturnNumEdgesRemoved, mgp::Type::Int),
+                mgp::Return(shortest_paths::kReturnRemovedEdges, {mgp::Type::List, mgp::Type::Relationship}),
             },
             module, memory
         );

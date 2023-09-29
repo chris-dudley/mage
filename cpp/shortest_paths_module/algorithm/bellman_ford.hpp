@@ -25,8 +25,9 @@ public:
     using Self = BellmanFordPathfinder<TSize>;
     using EdgeIdSet = std::unordered_set<TSize>;
     using NodeIdSet = std::unordered_set<TSize>;
+    using NodeIdVec = std::vector<TSize>;
+    using EdgeIdVec = std::vector<TSize>;
 
-private:
     using GraphType = mg_graph::Graph<TSize>;
 
     struct Edge {
@@ -36,16 +37,19 @@ private:
         double weight;
     };
 
+    using PredecessorVec = std::vector<std::optional<Edge>>;
+
     static constexpr const double EPSILON = 1e-14;
     static constexpr const double POS_INF = std::numeric_limits<double>::infinity();
 
+private:
     /// @brief Number of verticies in graph being considered.
     size_t num_vertex;
     /// @brief ID of source node for paths.
     TSize source_id;
     /// @brief `dist_to[v]` = distance of shortest path from source to `v`
     std::vector<double> dist_to;
-    /// @brief `edge_nto[v]` = edge leading into `v` on shortest path from source
+    /// @brief `edge_into[v]` = edge leading into `v` on shortest path from source
     std::vector<std::optional<Edge>> edge_into;
     /// @brief `on_queue[v]` = is vertex `v` currently on the queue?
     std::vector<bool> on_queue;
@@ -173,6 +177,53 @@ public:
     /// @brief Returns a found negative cycle, if any.
     std::optional<Path<TSize>> negative_cycle() const {
         return cycle;
+    }
+
+    /// @brief Returns the number of reachable nodes in the graph, including the source.
+    size_t num_reachable_nodes() const {
+        size_t result = 0;
+        for (size_t node_id = 0; node_id < dist_to.size(); node_id++) {
+            if (dist_to[node_id] < POS_INF) {
+                result++;
+            }
+        }
+        return result;
+    }
+
+    /// @brief Returns the set of nodes that are the source or reachable from the source.
+    NodeIdVec reachable_nodes() const {
+        std::vector<TSize> result;
+        for (size_t node_id = 0; node_id < dist_to.size(); node_id++) {
+            if (dist_to[node_id] < POS_INF) {
+                result.push_back(node_id);
+            }
+        }
+        return result;
+    }
+
+    /// @brief Returns the set of edges used to traverse the minimum-weighted paths to reachable nodes.
+    /// If the graph has a negative cycle, the returned edges are not guaranteed to contain all edges needed
+    /// to reach all nodes.
+    EdgeIdVec edges_used() const {
+        EdgeIdVec result;
+        for (const auto& maybe_edge : edge_into) {
+            if (!maybe_edge.has_value()) {
+                continue;
+            }
+            result.push_back(maybe_edge.value().id);
+        }
+        return result;
+    }
+
+    /// @brief Returns a vector containing the predecessor edges for each vertex.
+    ///
+    /// For each vertex `v`, `predecessors[v]` will either be empty or contain information about
+    /// the edge leading into `v` in the minimum-weight predecessor tree constructed by Bellman-Ford.
+    ///
+    /// If `predecessors[v]` has no value, that vertex is not reachable from the source.
+    /// @return The predecessors vector.
+    const PredecessorVec& predecessors() const {
+        return edge_into;
     }
 
     /// @brief Returns whether a path from the source to the specified vertex exists.
