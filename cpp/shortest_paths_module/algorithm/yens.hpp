@@ -17,7 +17,7 @@ namespace shortest_paths {
 std::vector<Path<>> KShortestPaths(
     const mg_graph::GraphView<> &graph, std::uint64_t source_id, std::uint64_t sink_id,
     std::uint64_t K, ShortestPathFunc shortest_path_func,
-    CheckAbortFunc check_abort
+    const CheckAbortFunc& check_abort
 );
 
 } // namespace shortest_paths

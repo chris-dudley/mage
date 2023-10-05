@@ -6,6 +6,7 @@
 #include <mg_test_utils.hpp>
 
 #include "algorithm/shortest_path.hpp"
+#include "algorithm/dijkstra.hpp"
 #include "algorithm/yens.hpp"
 #include "algorithm/bellman_ford.hpp"
 #include "algorithm/iterative_bf.hpp"

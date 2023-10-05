@@ -174,7 +174,7 @@ public:
     Path<TSize> search(
         const GraphViewType& graph, TSize source, TSize target,
         const EdgeIdSet& initial_ignored_edges, const NodeIdSet& ignored_nodes,
-        CheckAbortFunc check_abort
+        const CheckAbortFunc& check_abort
     ) {
         return search(
             graph, source, target,
@@ -202,7 +202,7 @@ public:
         const GraphViewType& graph, TSize source, TSize target,
         const EdgeIdSet& initial_ignored_edges, const NodeIdSet& ignored_nodes,
         const EdgeScoresVec& edge_scores, bool cull_ascending,
-        CheckAbortFunc check_abort
+        const CheckAbortFunc& check_abort
     ) {
         Path<TSize> result(source);
         if (source == target) {
@@ -240,7 +240,7 @@ public:
     void remove_cycles(
         const GraphViewType& graph, TSize source,
         const EdgeIdSet& initial_ignored_edges, const NodeIdSet& ignored_nodes,
-        CheckAbortFunc check_abort
+        const CheckAbortFunc& check_abort
     ) {
         remove_cycles(
             graph, source,
@@ -266,7 +266,7 @@ public:
         const GraphViewType& graph, TSize source,
         const EdgeIdSet& initial_ignored_edges, const NodeIdSet& ignored_nodes,
         const EdgeScoresVec& edge_scores, bool cull_ascending,
-        CheckAbortFunc check_abort
+        const CheckAbortFunc& check_abort
     ) {
         auto num_edges = graph.Edges().size();
         if (num_edges > edge_scores.size()) {
@@ -285,7 +285,7 @@ private:
         const GraphViewType& graph, TSize source, TSize target,
         const EdgeIdSet& initial_ignored_edges, const NodeIdSet& ignored_nodes,
         const EdgeScoresVec& edge_scores, bool cull_ascending,
-        CheckAbortFunc check_abort
+        const CheckAbortFunc& check_abort
     ) {
         ScoreComparator comparator = cull_ascending ? ScoredEdge::greater : ScoredEdge::less;
         EdgeIdSet ignored_edges = initial_ignored_edges;
@@ -387,7 +387,7 @@ Path<TSize> IterativeBellmanFord(
     const mg_graph::GraphView<TSize>& graph, TSize source_id, TSize target_id,
     const std::unordered_set<TSize>& ignored_edges,
     const std::unordered_set<TSize>& ignored_nodes,
-    CheckAbortFunc check_abort
+    const CheckAbortFunc& check_abort
 ) {
     size_t num_edges = graph.Edges().size();
     std::vector<double> scores(num_edges, 1.0);
@@ -422,7 +422,7 @@ Path<TSize> IterativeBellmanFord(
     const std::unordered_set<TSize>& ignored_nodes,
     const std::vector<double>& edge_scores,
     bool cull_ascending,
-    CheckAbortFunc check_abort
+    const CheckAbortFunc& check_abort
 ) {
     size_t num_edges = graph.Edges().size();
     if (num_edges > edge_scores.size()) {
