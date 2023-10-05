@@ -28,24 +28,11 @@ using ShortestPathFunc = std::function<
     Path<>(
         const mg_graph::GraphView<> &, std::uint64_t, std::uint64_t,
         const NodeIdSet&, const EdgeIdSet&,
-        CheckAbortFunc
+        const CheckAbortFunc&
     )
 >;
 
 /// @brief No-op function for passing in to pathfinders when no checking is required.
 void CheckAbortNoop();
-
-/// @brief Computes the shortest path from source to sink using Dijkstra's algorithm.
-/// @param graph Current graph.
-/// @param source_id ID of source node for path.
-/// @param sink_id  ID of final node for path.
-/// @param ignored_edges IDs of edges to ignore when pathfinding.
-/// @param ignored_nodes IDs of nodes to ignore when pathfinding.
-/// @return Path from source to sink.
-Path<> Dijkstra(
-    const mg_graph::GraphView<> &graph, std::uint64_t source_id, std::uint64_t sink_id,
-    const EdgeIdSet& ignored_edges, const NodeIdSet& ignored_nodes,
-    CheckAbortFunc check_abort
-);
 
 } // namespace shortest_paths

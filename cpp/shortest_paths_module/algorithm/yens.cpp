@@ -1,4 +1,5 @@
 #include "yens.hpp"
+#include "dijkstra.hpp"
 
 #include <algorithm>
 #include <queue>
@@ -35,7 +36,7 @@ std::vector<size_t> find_same_cost_paths(const std::vector<Path<>>& paths, doubl
 std::vector<Path<>> KShortestPaths(
     const mg_graph::GraphView<> &graph, std::uint64_t source_id, std::uint64_t sink_id,
     std::uint64_t K, ShortestPathFunc shortest_path_func,
-    CheckAbortFunc check_abort
+    const CheckAbortFunc& check_abort
 ) {
     std::vector<Path<>> result;
     // Using a heap instead of a priority_queue so that we can search the heap for

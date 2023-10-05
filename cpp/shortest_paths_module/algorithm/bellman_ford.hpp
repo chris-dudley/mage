@@ -73,7 +73,7 @@ public:
     /// @param source The ID of the source node.
     /// @param check_abort Function that should throw an exception if execution should be aborted.
     /// @throws std::invalid_argument if the source node is not in the graph.
-    BellmanFordPathfinder(const GraphViewType& graph, TSize source, CheckAbortFunc check_abort = CheckAbortNoop):
+    BellmanFordPathfinder(const GraphViewType& graph, TSize source, const CheckAbortFunc& check_abort = CheckAbortNoop):
         num_vertex(graph.Nodes().size()),
         source_id(source),
         dist_to(graph.Nodes().size(), POS_INF),
@@ -108,7 +108,7 @@ public:
     BellmanFordPathfinder(
         const GraphViewType& graph, TSize source,
         const EdgeIdSet& ignored_edges, const NodeIdSet& ignored_nodes,
-        CheckAbortFunc check_abort = CheckAbortNoop
+        const CheckAbortFunc& check_abort = CheckAbortNoop
     ):
         num_vertex(graph.Nodes().size()),
         source_id(source),
@@ -135,14 +135,14 @@ public:
     /// @param source The ID of the source node.
     /// @param check_abort Function that should throw an exception if execution should be aborted.
     /// @throws std::invalid_argument if the source node is not in the graph.
-    void search(const GraphViewType& graph, TSize source, CheckAbortFunc check_abort = CheckAbortNoop) {
+    void search(const GraphViewType& graph, TSize source, const CheckAbortFunc& check_abort = CheckAbortNoop) {
         if (source >= graph.Nodes().size()) {
             throw std::invalid_argument("source node not in graph");
         }
         EdgeIdSet empty_edges;
         NodeIdSet empty_nodes;
         reset(graph, source);
-        do_search(graph, source, empty_edges, empty_nodes, CheckAbortNoop);
+        do_search(graph, source, empty_edges, empty_nodes, check_abort);
     }
 
     /// @brief Resets the state of the pathfinder and then searches for the shorest paths on `graph` from `source`
@@ -159,7 +159,7 @@ public:
     void search(
         const GraphViewType& graph, TSize source,
         const EdgeIdSet& ignored_edges, const NodeIdSet& ignored_nodes,
-        CheckAbortFunc check_abort = CheckAbortNoop
+        const CheckAbortFunc& check_abort = CheckAbortNoop
     ) {
         if (source >= graph.Nodes().size()) {
             throw std::invalid_argument("source node not in graph");
@@ -276,7 +276,7 @@ private:
     void do_search(
         const GraphViewType& graph, TSize source,
         const EdgeIdSet& ignored_edges, const NodeIdSet& ignored_nodes,
-        CheckAbortFunc check_abort
+        const CheckAbortFunc& check_abort
     ) {
         dist_to[source] = 0.0;
         queue.push_back(source);

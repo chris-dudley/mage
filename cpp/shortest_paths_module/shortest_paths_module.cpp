@@ -5,6 +5,7 @@
 #include <string>
 
 #include "algorithm/shortest_path.hpp"
+#include "algorithm/dijkstra.hpp"
 #include "algorithm/yens.hpp"
 #include "algorithm/procedures.hpp"
 #include "algorithm/bellman_ford.hpp"
