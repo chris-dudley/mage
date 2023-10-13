@@ -1,4 +1,8 @@
 #include <map>
+#include <set>
+#include <unordered_set>
+#include <list>
+#include <forward_list>
 
 #include <gtest/gtest.h>
 #include <mg_generate.hpp>
@@ -10,6 +14,7 @@
 #include "algorithm/yens.hpp"
 #include "algorithm/bellman_ford.hpp"
 #include "algorithm/iterative_bf.hpp"
+#include "algorithm/johnsons.hpp"
 
 void check_abort_noop() {}
 
@@ -751,6 +756,192 @@ TEST(ShortestPaths, IterativeBellmanFordSmallGraphWithNegativeCycle) {
     path = pathfinder.search(*G, 0, 5, {}, {}, check_abort_noop);
     ASSERT_EQ(path, expected_path);
     ASSERT_EQ(pathfinder.num_edges_removed(), 2ULL);
+}
+
+TEST(ShortestPaths, JohnsonsEmptyGraph) {
+    auto G = mg_generate::BuildGraph(0, {});
+
+    shortest_paths::JohnsonsPathfinder<> pathfinder;
+    pathfinder.search_all(*G, check_abort_noop, 1);
+
+    ASSERT_EQ(pathfinder.num_reachable_nodes_from(0), 0UL);
+}
+
+TEST(ShortestPaths, JohnsonsSingleNode) {
+    auto G = mg_generate::BuildGraph(1, {});
+
+    shortest_paths::JohnsonsPathfinder<> pathfinder;
+    pathfinder.search_all(*G, check_abort_noop, 1);
+
+    ASSERT_EQ(pathfinder.num_reachable_nodes_from(0), 1UL);
+}
+
+TEST(ShortestPaths, JohnsonsDisconnectedNodes) {
+    auto G = mg_generate::BuildGraph(10, {});
+
+    shortest_paths::JohnsonsPathfinder<> pathfinder;
+    pathfinder.search_all(*G, check_abort_noop, 1);
+
+    ASSERT_EQ(pathfinder.num_reachable_nodes_from(0), 1UL);
+
+    std::vector<std::uint64_t> sources = {0};
+    pathfinder.search_some(*G, sources, check_abort_noop, 1);
+
+    ASSERT_EQ(pathfinder.num_reachable_nodes_from(0), 1UL);
+    ASSERT_FALSE(pathfinder.has_pathfinder(1));
+
+    // Test some other container types and thread numbers to make sure all methods are instantiated.
+    std::unordered_set<uint64_t> sources_uset = {0};
+    std::set<uint64_t> sources_set = {0};
+    std::list<uint64_t> sources_list = {0};
+    std::forward_list<uint64_t> sources_flist = {0};
+
+    pathfinder.search_some(*G, sources_uset, check_abort_noop, 2);
+    ASSERT_EQ(pathfinder.num_reachable_nodes_from(0), 1UL);
+    ASSERT_FALSE(pathfinder.has_pathfinder(1));
+
+    std::vector<double> scores(10, 0.0);
+    pathfinder.search_some_remove_cycles(*G, sources_set, scores, true, check_abort_noop, 1);
+    ASSERT_EQ(pathfinder.num_reachable_nodes_from(0), 1UL);
+    ASSERT_FALSE(pathfinder.has_pathfinder(1));
+
+    pathfinder.search_some_remove_cycles(*G, sources_list, scores, true, check_abort_noop, 2);
+    ASSERT_EQ(pathfinder.num_reachable_nodes_from(0), 1UL);
+    ASSERT_FALSE(pathfinder.has_pathfinder(1));
+
+    pathfinder.search_some(*G, sources_flist, check_abort_noop, 1);
+    ASSERT_EQ(pathfinder.num_reachable_nodes_from(0), 1UL);
+    ASSERT_FALSE(pathfinder.has_pathfinder(1));
+}
+
+/*
+ *                  ┌────────────-10───────────────┐
+ *                ┌─▼─┐                          ┌─┴─┐
+ *   ┌──50───────►│ 2 ├─────────┬────────80─────►│ 4 │
+ *   │            └───┘         │                └▲─┬┘
+ *   │                         40                 │ │
+ *   │                          │                 │ 40
+ * ┌─┴─┐                       ┌▼──┐              │ │
+ * │ 0 ├────────100───────────►│ 3 ├──┬──30───────┘ │
+ * └─┬─┘                       └▲──┘  │             │
+ *   │                          │     │          ┌──▼┐
+ *   │                         40     └──80─────►│ 5 │
+ *   │                          │                └───┘
+ *   │            ┌───┐         │
+ *   └──50───────►│ 1 ├─────────┘
+ *                └───┘
+ */
+TEST(ShortestPaths, JohnsonsSmallGraphWithNegativeEdge) {
+    size_t NUM_VERTEX = 6;
+    auto G = mg_generate::BuildWeightedGraph(
+        NUM_VERTEX,
+        {
+            /* 0*/ {{0, 1}, 50.0}, /* 1*/ {{0, 2}, 50.0}, /* 2*/ {{0, 3}, 100.0},
+            /* 3*/ {{1, 3}, 40.0},
+            /* 4*/ {{2, 3}, 40.0}, /* 5*/ {{2, 4}, 80.0},
+            /* 6*/ {{3, 4}, 30.0}, /* 7*/ {{3, 5}, 80.0},
+            /* 8*/ {{4, 5}, 40.0},
+            // new edges
+            /* 9*/ {{4, 2}, -10.0},
+        },
+        mg_graph::GraphType::kDirectedGraph
+    );
+    std::vector<double> expected_node_weights = {0.0, 0.0, -10.0, 0.0, 0.0, 0.0};
+    std::vector<double> expected_edge_weights = {
+        50.0, 60.0, 100.0, 40.0, 30.0, 70.0, 30.0, 80.0, 40.0, 0.0
+    };
+
+    shortest_paths::JohnsonsPathfinder<> pathfinder;
+    pathfinder.search_all(*G, check_abort_noop, 0);
+
+    ASSERT_FALSE(pathfinder.has_negative_cycle());
+    ASSERT_EQ(pathfinder.node_weights(), expected_node_weights);
+    ASSERT_EQ(pathfinder.edge_weights(), expected_edge_weights);
+
+    for (size_t source_id = 0; source_id < NUM_VERTEX; source_id++) {
+        ASSERT_TRUE(pathfinder.has_pathfinder(source_id));
+    }
+
+    ASSERT_TRUE(pathfinder.has_path(0, 5));
+    auto path_0_5 = pathfinder.get_path(0, 5);
+    ASSERT_FLOAT_EQ(path_0_5.total_cost, 160.0);
+
+    auto path_2_3 = pathfinder.get_path(2, 3);
+    ASSERT_FLOAT_EQ(path_2_3.total_cost, 30.0);
+}
+/*
+ *                  ┌─────────── -100 ─────────────┐
+ *                ┌─▼─┐                          ┌─┴─┐
+ *   ┌──50───────►│ 2 ├─────────┬────────80─────►│ 4 │
+ *   │            └───┘         │                └▲─┬┘
+ *   │                         40                 │ │
+ *   │                          │                 │ 40
+ * ┌─┴─┐                       ┌▼──┐              │ │
+ * │ 0 ├────────100───────────►│ 3 ├──┬─-30───────┘ │
+ * └─┬─┘                       └▲──┘  │             │
+ *   │                          │     │          ┌──▼┐
+ *   │                         40     └──80─────►│ 5 │
+ *   │                          │                └───┘
+ *   │            ┌───┐         │
+ *   └──50───────►│ 1 ├─────────┘
+ *                └───┘
+ */
+TEST(ShortestPaths, JohnsonsSmallGraphWithNegativeCycle) {
+    auto G = mg_generate::BuildWeightedGraph(
+        6,
+        {
+            /* 0*/ {{0, 1}, 50.0}, /* 1*/ {{0, 2}, 50.0}, /* 2*/ {{0, 3}, 100.0},
+            /* 3*/ {{1, 3}, 40.0},
+            /* 4*/ {{2, 3}, 40.0}, /* 5*/ {{2, 4}, 80.0},
+            /* 6*/ {{3, 4}, -30.0}, /* 7*/ {{3, 5}, 80.0},
+            /* 8*/ {{4, 5}, 40.0},
+            // new edges
+            /* 9*/ {{4, 2}, -100.0},
+        },
+        mg_graph::GraphType::kDirectedGraph
+    );
+    std::vector<double> edge_scores;
+    for (const auto& edge : G->Edges()) {
+        edge_scores.push_back(G->GetWeight(edge.id));
+    }
+    shortest_paths::Path<> expected_cycle{
+        {2,3,  4, 2},
+        {4, 6, 9},
+        {0.0, 40.0, 10.0, -90.0},
+        -90.0,
+    };
+
+    shortest_paths::JohnsonsPathfinder<> pathfinder;
+    pathfinder.search_all(*G, check_abort_noop, 0);
+
+    ASSERT_TRUE(pathfinder.has_negative_cycle());
+    ASSERT_EQ(pathfinder.negative_cycle().value(), expected_cycle);
+
+    std::vector<double> expected_node_weights = {0.0, 0.0, 0.0, 0.0, -30.0, 0.0};
+    std::vector<double> expected_edge_weights = {
+        50.0, 50.0, 100.0, 40.0, 40.0, 110.0, 0.0, 80.0, 10.0, -130.0
+    };
+    std::unordered_set<uint64_t> expedted_removed_edges = {9};
+
+    pathfinder.search_all_remove_cycles(*G, edge_scores, true, check_abort_noop, 0);
+    ASSERT_FALSE(pathfinder.has_negative_cycle());
+    ASSERT_EQ(pathfinder.num_edges_removed(), 1UL);
+    ASSERT_EQ(pathfinder.removed_edges(), expedted_removed_edges);
+    ASSERT_EQ(pathfinder.node_weights(), expected_node_weights);
+    ASSERT_EQ(pathfinder.edge_weights(), expected_edge_weights);
+
+    shortest_paths::Path<> expected_path_0_5 = {
+        {0, 1, 3, 4, 5},
+        {0, 3, 6, 8},
+        {0.0, 50.0, 90.0, 90.0, 100.0},
+        100.0
+    };
+
+    auto path_0_5 = pathfinder.get_path(0, 5);
+    ASSERT_EQ(path_0_5.nodes, expected_path_0_5.nodes);
+    ASSERT_EQ(path_0_5.edges, expected_path_0_5.edges);
+    ASSERT_EQ(path_0_5.costs, expected_path_0_5.costs);
+    ASSERT_FLOAT_EQ(path_0_5.total_cost, expected_path_0_5.total_cost);
 }
 
 int main(int argc, char **argv) {
