@@ -160,6 +160,12 @@ public:
         return pathfinder.predecessors();
     }
 
+    /// @brief Returns the vector containing the shortest distance from the source vertex to each vertex
+    /// in the graph.
+    const std::vector<double>& distances() const {
+        return pathfinder.distances();
+    }
+
     /// @brief Searches the graph for a path from source to target without negative cycles. The previously
     /// stored edge scores and culling order will be used to remove edges if negative cycles are encountered.
     /// @param graph The graph to operate on.

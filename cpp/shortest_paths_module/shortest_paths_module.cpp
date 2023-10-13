@@ -10,6 +10,7 @@
 #include "algorithm/procedures.hpp"
 #include "algorithm/bellman_ford.hpp"
 #include "algorithm/iterative_bf.hpp"
+#include "algorithm/johnsons.hpp"
 
 namespace {
 

@@ -25,9 +25,9 @@ public:
     using EdgeIdSet = std::unordered_set<TSize>;
     /// @brief Represents a set of nodes by ID.
     using NodeIdSet = std::unordered_set<TSize>;
-    /// @brief An vector of nodes by ID.
+    /// @brief A vector of nodes by ID.
     using NodeIdVec = std::vector<TSize>;
-    /// @brief a vector of edges by ID.
+    /// @brief A vector of edges by ID.
     using EdgeIdVec = std::vector<TSize>;
 
     /// @brief Infinite distance used for unreachable nodes.

@@ -226,6 +226,12 @@ public:
         return edge_into;
     }
 
+    /// @brief Returns the vector containing the shortest distance from the source vertex to each vertex
+    /// in the graph.
+    const std::vector<double>& distances() const {
+        return dist_to;
+    }
+
     /// @brief Returns whether a path from the source to the specified vertex exists.
     /// @param vertex The ID of the destination vertex.
     bool has_path_to(TSize vertex) const {
