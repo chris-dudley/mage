@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <thread>
 #include <ranges>
 
 #include <fmt/core.h>
@@ -551,7 +552,7 @@ private:
         const CheckAbortFunc& check_abort, int threads
     ) {
         if (threads <=0) {
-            threads = omp_get_num_procs();
+            threads = std::thread::hardware_concurrency();
         }
 
         size_t num_nodes = graph.Nodes().size();
@@ -609,7 +610,7 @@ private:
         static_assert(std::convertible_to< std::ranges::range_value_t<TSourceCont>, TSize >);
 
         if (threads <=0) {
-            threads = omp_get_num_procs();
+            threads = std::thread::hardware_concurrency();
         }
 
         size_t num_nodes = graph.Nodes().size();
