@@ -1,0 +1,27 @@
+query: >-
+    CALL shortest_paths.johnsons_subgraph('weight')
+    YIELD
+      negative_cycle,
+      nodes AS subgraph_nodes,
+      edges AS subgraph_edges,
+      node_weights,
+      edge_weights,
+      num_edges_removed,
+      removed_edges
+    RETURN
+      negative_cycle,
+      extract(n IN subgraph_nodes | n.id) AS node_ids,
+      extract(r IN subgraph_edges | r.id) AS edge_ids,
+      node_weights,
+      edge_weights,
+      num_edges_removed
+
+output:
+  - negative_cycle: false
+    node_ids: [0, 1, 2, 3, 4, 5]
+    # Edges 2, 5, and 7 shouldn't be part of any shortest path
+    edge_ids: [0, 1, 3, 4, 6, 8, 9]
+    node_weights: [0, 0, -10, 0, 0, 0]
+    # Edges leading into node 2 should have weight+10, edges leading out should have weight-10
+    edge_weights: [50, 60, 40, 30, 30, 40, 0]
+    num_edges_removed: 0
