@@ -306,7 +306,7 @@ TEST(ShortestPaths, DijkstraHugeCyclicGraph) {
 TEST(ShortestPaths, YensEmptyGraph) {
     auto G = mg_generate::BuildGraph(0, {});
 
-    auto paths = shortest_paths::KShortestPaths(*G, 0, 0, 1, shortest_paths::Dijkstra, check_abort_noop);
+    auto paths = shortest_paths::KShortestPaths(*G, 0, 0, 1, check_abort_noop);
 
     ASSERT_TRUE(paths.empty());
 }
@@ -314,7 +314,7 @@ TEST(ShortestPaths, YensEmptyGraph) {
 TEST(ShortestPaths, YensSingleNode) {
     auto G = mg_generate::BuildGraph(1, {});
 
-    auto paths = shortest_paths::KShortestPaths(*G, 0, 0, 1, shortest_paths::Dijkstra, check_abort_noop);
+    auto paths = shortest_paths::KShortestPaths(*G, 0, 0, 1, check_abort_noop);
 
     ASSERT_TRUE(paths.empty());
 }
@@ -322,7 +322,7 @@ TEST(ShortestPaths, YensSingleNode) {
 TEST(ShortestPaths, YensDisconnectedNodes) {
     auto G = mg_generate::BuildGraph(10, {});
 
-    auto paths = shortest_paths::KShortestPaths(*G, 0, 9, 1, shortest_paths::Dijkstra, check_abort_noop);
+    auto paths = shortest_paths::KShortestPaths(*G, 0, 9, 1, check_abort_noop);
 
     ASSERT_TRUE(paths.empty());
 }
@@ -362,7 +362,7 @@ TEST(ShortestPaths, YensSmallAcyclicGraph) {
     };
 
     // Find the top 3 best paths
-    auto paths = shortest_paths::KShortestPaths(*G, 0, 5, 3, shortest_paths::Dijkstra, check_abort_noop);
+    auto paths = shortest_paths::KShortestPaths(*G, 0, 5, 3, check_abort_noop);
 
     // Could technically just compare the vectors, but this gives more useful output.
     ASSERT_EQ(paths.size(), expected_paths.size());
@@ -421,7 +421,7 @@ TEST(ShortestPaths, YensSmallAcyclicGraphParallelEdges) {
     };
 
     // Set K really high so we find all the paths
-    auto paths = shortest_paths::KShortestPaths(*G, 0, 5, 100, shortest_paths::Dijkstra, check_abort_noop);
+    auto paths = shortest_paths::KShortestPaths(*G, 0, 5, 100, check_abort_noop);
     ASSERT_EQ(paths.size(), expected_paths.size());
     ASSERT_TRUE(CheckPaths(paths, expected_paths));
 }
@@ -470,7 +470,7 @@ TEST(ShortestPaths, YensSmallGraphWithCycle) {
     };
 
     // Set K really high so we find all the paths
-    auto paths = shortest_paths::KShortestPaths(*G, 0, 5, 100, shortest_paths::Dijkstra, check_abort_noop);
+    auto paths = shortest_paths::KShortestPaths(*G, 0, 5, 100, check_abort_noop);
     ASSERT_EQ(paths.size(), expected_paths.size());
     ASSERT_TRUE(CheckPaths(paths, expected_paths));
 }
@@ -504,14 +504,22 @@ TEST(ShortestPaths, YensComplexGraph) {
     );
     const uint64_t K = 100;
 
-    // Should be more than 30 paths
-    auto paths = shortest_paths::KShortestPaths(*G, 0, 1, K, shortest_paths::Dijkstra, check_abort_noop);
+    // Should be more than 100 paths
+    auto paths = shortest_paths::KShortestPaths(*G, 0, 1, K, check_abort_noop);
     ASSERT_EQ(paths.size(), K);
     double prev_weight = -std::numeric_limits<double>::infinity();
     for (size_t i = 0; i < paths.size(); i++) {
         const auto& path = paths[i];
         ASSERT_GE(path.total_cost, prev_weight) << "Path " << i << " had weight less than prevous path";
         prev_weight = path.total_cost;
+    }
+
+    // Get paths in single-threaded mode, should be the same
+    auto paths_seq = shortest_paths::KShortestPaths(*G, 0, 1, K, check_abort_noop, 1);
+    ASSERT_EQ(paths_seq.size(), paths.size());
+    for (size_t i = 0; i < paths_seq.size(); i++) {
+        const auto& path = paths_seq[i];
+        ASSERT_EQ(path.edges, paths[i].edges) << "Path " << i << " has different edges than in parallel result";
     }
 }
 
@@ -869,6 +877,7 @@ TEST(ShortestPaths, JohnsonsSmallGraphWithNegativeEdge) {
     auto path_2_3 = pathfinder.get_path(2, 3);
     ASSERT_FLOAT_EQ(path_2_3.total_cost, 30.0);
 }
+
 /*
  *                  ┌─────────── -100 ─────────────┐
  *                ┌─▼─┐                          ┌─┴─┐
@@ -942,6 +951,62 @@ TEST(ShortestPaths, JohnsonsSmallGraphWithNegativeCycle) {
     ASSERT_EQ(path_0_5.edges, expected_path_0_5.edges);
     ASSERT_EQ(path_0_5.costs, expected_path_0_5.costs);
     ASSERT_FLOAT_EQ(path_0_5.total_cost, expected_path_0_5.total_cost);
+}
+
+/*
+ *                  ┌─────────── -100 ─────────────┐
+ *                ┌─▼─┐                          ┌─┴─┐
+ *   ┌──50───────►│ 2 ├─────────┬────────80─────►│ 4 │
+ *   │            └───┘         │                └▲─┬┘
+ *   │                         40                 │ │
+ *   │                          │                 │ 40
+ * ┌─┴─┐                       ┌▼──┐              │ │
+ * │ 0 ├────────100───────────►│ 3 ├──┬─-30───────┘ │
+ * └─┬─┘                       └▲──┘  │             │
+ *   │                          │     │          ┌──▼┐
+ *   │                         40     └──80─────►│ 5 │
+ *   │                          │                └───┘
+ *   │            ┌───┐         │
+ *   └──50───────►│ 1 ├─────────┘
+ *                └───┘
+ */
+TEST(ShortestPaths, JohnsonsKShortestSmallNegCycle) {
+    auto G = mg_generate::BuildWeightedGraph(
+        6,
+        {
+            /* 0*/ {{0, 1}, 50.0}, /* 1*/ {{0, 2}, 50.0}, /* 2*/ {{0, 3}, 100.0},
+            /* 3*/ {{1, 3}, 40.0},
+            /* 4*/ {{2, 3}, 40.0}, /* 5*/ {{2, 4}, 80.0},
+            /* 6*/ {{3, 4}, -30.0}, /* 7*/ {{3, 5}, 80.0},
+            /* 8*/ {{4, 5}, 40.0},
+            // new edges
+            /* 9*/ {{4, 2}, -100.0},
+        },
+        mg_graph::GraphType::kDirectedGraph
+    );
+    std::vector<double> edge_scores;
+    for (const auto& edge : G->Edges()) {
+        edge_scores.push_back(G->GetWeight(edge.id));
+    }
+
+    // Expected paths once the cycle is eliminated
+    std::vector<shortest_paths::Path<>> expected_paths = {
+        {{0, 1, 3, 4, 5}, {0, 3, 6, 8}, {0.0, 50.0, 90.0, 90.0, 100.0}, 100.0},
+        {{0, 2, 3, 4, 5}, {1, 4, 6, 8}, {0.0, 50.0, 90.0, 90.0, 100.0}, 100.0},
+        {{0, 3, 4, 5}, {2, 6, 8}, {0.0, 100.0, 100.0, 110.0}, 110.0}
+    };
+
+    shortest_paths::JohnsonsPathfinder<> pathfinder;
+    auto paths = pathfinder.k_shortest_paths(*G, 0, 5, 3, check_abort_noop);
+    ASSERT_TRUE(paths.empty());
+    ASSERT_TRUE(pathfinder.has_negative_cycle());
+
+    // Find the top 3 best paths
+    paths = pathfinder.k_shortest_paths_remove_cycles(*G, 0, 5, 3, edge_scores, true, check_abort_noop);
+
+    // Could technically just compare the vectors, but this gives more useful output.
+    ASSERT_EQ(paths.size(), expected_paths.size());
+    ASSERT_TRUE(CheckPaths(paths, expected_paths));
 }
 
 int main(int argc, char **argv) {

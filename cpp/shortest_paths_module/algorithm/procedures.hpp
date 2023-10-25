@@ -12,6 +12,7 @@ constexpr const std::string_view kProcedureIterativeBellmanFordSubgraph = "itera
 constexpr const std::string_view kProcedureJohnsonsSubgraph = "johnsons_subgraph";
 constexpr const std::string_view kProcedureJohnsonsSourceSubgraphs = "johnsons_source_subgraphs";
 constexpr const std::string_view kProcedureJohnsonsPaths = "johnsons_paths";
+constexpr const std::string_view kProcedureJohnsonsKShortest = "johnsons_k_shortest";
 
 constexpr const std::string_view kArgumentSourceNode = "source_node";
 constexpr const std::string_view kArgumentSourceNodes = "source_nodes";
