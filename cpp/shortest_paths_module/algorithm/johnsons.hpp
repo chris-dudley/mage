@@ -13,6 +13,7 @@
 #include "iterative_bf.hpp"
 #include "dijkstra.hpp"
 #include "yens.hpp"
+#include "disjoint.hpp"
 
 namespace shortest_paths {
 
@@ -46,6 +47,7 @@ private:
     using IteraveBellmanFordPF = IterativeBellmanFordPathfinder<TSize>;
     using DijkstraUniquePtr = std::unique_ptr<DijkstraPF>;
     using YensPF = YensPathfinder<TSize>;
+    using DisjointPF = DisjointPathfinder<TSize>;
 
     // Adjusted nodes weights calculated using Bellman-Ford's algorithm.
     std::vector<double> _node_weights;
@@ -320,6 +322,35 @@ public:
         return pathfinder.search(reweighted_graph, source_id, target_id, k, check_abort, threads);
     }
 
+    /// @brief Attempts to find the disjoint K shortest paths between the given source and target
+    /// on the re-weighted graph.
+    ///
+    /// If a negative cycle is detected, it will be stored and no paths will be returned.
+    ///
+    /// @param graph The graph to search.
+    /// @param source_id ID of the source node for pathfinding.
+    /// @param target_id ID of the target node for pathfinding.
+    /// @param k Number of shortest paths to return.
+    /// @param check_abort Function that should throw an exception if execution should be aborted.
+    /// @return A vector containing the shortest paths in order of ascending total cost.
+    PathVec disjoint_k_shortest_paths(
+        const GraphViewType& graph,
+        TSize source_id, TSize target_id, size_t k,
+        const CheckAbortFunc& check_abort = CheckAbortNoop
+    ) {
+        EdgeIdSet ignored_edges;
+        NodeIdSet ignored_nodes;
+        calculate_node_weights_bf(graph, ignored_edges, ignored_nodes, check_abort);
+        if (_neg_cycle) {
+            return {};
+        }
+        calculate_edge_weights(graph);
+        auto reweighted_graph = copy_graph(graph, _edge_weights);
+
+        DisjointPF pathfinder;
+        return pathfinder.search(reweighted_graph, source_id, target_id, k, check_abort);
+    }
+
     /// @brief Attempts to compute the all pairs shortest paths for the given graph.
     ///
     /// If a negative cycle is detected, an edge will be removed from the graph based on the
@@ -480,6 +511,41 @@ public:
         YensPF pathfinder;
         return pathfinder.search(reweighted_graph, source_id, target_id, k, ignored_edges, ignored_nodes, check_abort, threads);
     }
+
+    /// @brief Attempts to find the disjoint K shortest paths between the given source and target
+    /// on the re-weighted graph.
+    ///
+    /// If a negative cycle is detected, it will be stored and no paths will be returned.
+    ///
+    /// @param graph The graph to search.
+    /// @param source_id ID of the source node for pathfinding.
+    /// @param target_id ID of the target node for pathfinding.
+    /// @param k Number of shortest paths to return.
+    /// @param edge_scores The scores for each edge to be used when removing edges in negative cycles.
+    /// @param cull_ascending Whether culling is performed in ascending or descending order of score.
+    /// @param check_abort Function that should throw an exception if execution should be aborted.
+    /// @return A vector containing the shortest paths in order of ascending total cost.
+    PathVec disjoint_k_shortest_paths_remove_cycles(
+        const GraphViewType& graph,
+        TSize source_id, TSize target_id, size_t k,
+        const WeightVec& edge_scores, bool cull_ascending,
+        const CheckAbortFunc& check_abort = CheckAbortNoop
+    ) {
+        EdgeIdSet ignored_edges;
+        NodeIdSet ignored_nodes;
+        calculate_node_weights_ibf(graph, edge_scores, cull_ascending, ignored_edges, ignored_nodes, check_abort);
+        calculate_edge_weights(graph);
+        auto reweighted_graph = copy_graph(graph, _edge_weights);
+
+        // Add any removed edges to the set of ignored edges during pathfinding
+        for (auto edge_id : _removed_edges) {
+            ignored_edges.emplace(edge_id);
+        }
+
+        DisjointPF pathfinder;
+        return pathfinder.search(reweighted_graph, source_id, target_id, k, ignored_edges, ignored_nodes, check_abort);
+    }
+
 
 private:
     GraphType copy_graph(const GraphViewType& graph) {

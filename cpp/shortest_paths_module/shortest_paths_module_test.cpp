@@ -15,6 +15,7 @@
 #include "algorithm/bellman_ford.hpp"
 #include "algorithm/iterative_bf.hpp"
 #include "algorithm/johnsons.hpp"
+#include "algorithm/disjoint.hpp"
 
 void check_abort_noop() {}
 
@@ -1003,6 +1004,47 @@ TEST(ShortestPaths, JohnsonsKShortestSmallNegCycle) {
 
     // Find the top 3 best paths
     paths = pathfinder.k_shortest_paths_remove_cycles(*G, 0, 5, 3, edge_scores, true, check_abort_noop);
+
+    // Could technically just compare the vectors, but this gives more useful output.
+    ASSERT_EQ(paths.size(), expected_paths.size());
+    ASSERT_TRUE(CheckPaths(paths, expected_paths));
+}
+
+/*
+ *                ┌───┐                          ┌───┐
+ *   ┌──50───────►│ 2 ├─────────┬────────80─────►│ 4 │
+ *   │            └───┘         │                └▲─┬┘
+ *   │                         40                 │ │
+ *   │                          │                 │ 40
+ * ┌─┴─┐                       ┌▼──┐              │ │
+ * │ 0 ├────────100───────────►│ 3 ├──┬──30───────┘ │
+ * └─┬─┘                       └▲──┘  │             │
+ *   │                          │     │          ┌──▼┐
+ *   │                         40     └──80─────►│ 5 │
+ *   │                          │                └───┘
+ *   │            ┌───┐         │
+ *   └──50───────►│ 1 ├─────────┘
+ *                └───┘
+ */
+TEST(ShortestPaths, DisjointSmallAcyclicGraph) {
+    auto G = mg_generate::BuildWeightedGraph(
+        6,
+        {
+            /*0*/ {{0, 1}, 50.0}, /*1*/ {{0, 2}, 50.0}, /*2*/ {{0, 3}, 100.0},
+            /*3*/ {{1, 3}, 40.0},
+            /*4*/ {{2, 3}, 40.0}, /*5*/ {{2, 4}, 80.0},
+            /*6*/ {{3, 4}, 30.0}, /*7*/ {{3, 5}, 80.0},
+            /*8*/ {{4, 5}, 40.0}
+        },
+        mg_graph::GraphType::kDirectedGraph
+    );
+    std::vector<shortest_paths::Path<>> expected_paths = {
+        {{0, 1, 3, 4, 5}, {0, 3, 6, 8}, {0.0, 50.0, 90.0, 120.0, 160.0}, 160.0},
+        {{0, 2, 3, 5}, {1, 4, 7}, {0.0, 50.0, 90.0, 170.0}, 170.0},
+    };
+
+    // Find all disjoint shortest paths
+    auto paths = shortest_paths::DisjointKShortestPaths<>(*G, 0UL, 5UL, 0UL, check_abort_noop);
 
     // Could technically just compare the vectors, but this gives more useful output.
     ASSERT_EQ(paths.size(), expected_paths.size());
