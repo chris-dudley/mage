@@ -1051,6 +1051,50 @@ TEST(ShortestPaths, DisjointSmallAcyclicGraph) {
     ASSERT_TRUE(CheckPaths(paths, expected_paths));
 }
 
+/*
+ *                ┌───┐                          ┌───┐
+ *   ┌──50───────►│ 2 ├─────────┬────────80─────►│ 4 │
+ *   │            └───┘         │                └▲─┬┘
+ *   │                         40                 │ │
+ *   │                          │                 │ 40
+ * ┌─┴─┐                       ┌▼──┐              │ │
+ * │ 0 ├────────100───────────►│ 3 ├──┬──30───────┘ │
+ * └─┬─┘                       └▲──┘  │             │
+ *   │                          │     │          ┌──▼┐
+ *   │                         40     └──80─────►│ 5 │
+ *   │                          │                └───┘
+ *   │            ┌───┐         │
+ *   └──50───────►│ 1 ├─────────┘
+ *                └───┘
+ */
+TEST(ShortestPaths, PartialDisjointSmallAcyclicGraph) {
+    auto G = mg_generate::BuildWeightedGraph(
+        6,
+        {
+            /*0*/ {{0, 1}, 50.0}, /*1*/ {{0, 2}, 50.0}, /*2*/ {{0, 3}, 100.0},
+            /*3*/ {{1, 3}, 40.0},
+            /*4*/ {{2, 3}, 40.0}, /*5*/ {{2, 4}, 80.0},
+            /*6*/ {{3, 4}, 30.0}, /*7*/ {{3, 5}, 80.0},
+            /*8*/ {{4, 5}, 40.0}
+        },
+        mg_graph::GraphType::kDirectedGraph
+    );
+    // Score edges by their ID number
+    std::vector<double> scores = {0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0};
+    std::vector<shortest_paths::Path<>> expected_paths = {
+        {{0, 1, 3, 4, 5}, {0, 3, 6, 8}, {0.0, 50.0, 90.0, 120.0, 160.0}, 160.0},
+        {{0, 2, 3, 4, 5}, {1, 4, 6, 8}, {0.0, 50.0, 90.0, 120.0, 160.0}, 160.0},
+        {{0, 3, 4, 5}, {2, 6, 8}, {0.0, 100.0, 130.0, 170.0}, 170.0},
+    }; 
+
+    // Find all partial disjoint shortest paths, removing smallest-ID edge first
+    auto paths = shortest_paths::PartialDisjointKShortestPaths<>(*G, 0UL, 5UL, 0UL, scores, 1UL, true, check_abort_noop);
+
+    // Could technically just compare the vectors, but this gives more useful output.
+    ASSERT_EQ(paths.size(), expected_paths.size());
+    ASSERT_TRUE(CheckPaths(paths, expected_paths));
+}
+
 int main(int argc, char **argv) {
     testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();

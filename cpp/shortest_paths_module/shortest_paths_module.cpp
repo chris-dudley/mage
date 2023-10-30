@@ -1055,7 +1055,7 @@ void Johnsons_Disjoint_K_Shortest(mgp_list *args, mgp_graph *memgraph_graph, mgp
 void DisjointKShortestPaths(mgp_list *args, mgp_graph *memgraph_graph, mgp_result *result, mgp_memory *memory) {
     // Indicies in the arguments list for parameters
     enum ArgIdx : size_t {
-        Source, Sink, K, WeightProp, DefaultWeight
+        Source, Sink, K, WeightProp, ScoreProp, DefaultWeight, DefaultScore, CullPerRound, CullAscending
     };
 
     mgp::MemoryDispatcherGuard mem_guard(memory);
@@ -1068,13 +1068,20 @@ void DisjointKShortestPaths(mgp_list *args, mgp_graph *memgraph_graph, mgp_resul
         const auto sink_node = arguments[ArgIdx::Sink].ValueNode();
         const auto K = arguments[ArgIdx::K].ValueInt();
         const auto weight_property = arguments[ArgIdx::WeightProp].ValueString();
+        const auto score_property = std::string(arguments[ArgIdx::ScoreProp].ValueString());
         const auto default_weight = arguments[ArgIdx::DefaultWeight].ValueDouble();
+        const auto default_score = arguments[ArgIdx::DefaultScore].ValueDouble();
+        const auto cull_per_round = arguments[ArgIdx::CullPerRound].ValueInt();
+        const auto cull_ascending = arguments[ArgIdx::CullAscending].ValueBool();
 
         bool weighted = ! weight_property.empty();
         const char * weight_prop_cstr = weighted ? weight_property.data() : nullptr;
 
         if (K < 0) {
             throw mgp::ValueException("K cannot be negative");
+        }
+        if (!score_property.empty() && cull_per_round < 1) {
+            throw mgp::ValueException("cull_per_round must be at least 1");
         }
 
         auto graph_view_ptr = mg_utility::GetGraphView(
@@ -1091,7 +1098,13 @@ void DisjointKShortestPaths(mgp_list *args, mgp_graph *memgraph_graph, mgp_resul
         const auto sink_id = GetInnerNodeId(graph_view, sink_mgid);
 
         auto abort_func = [&graph] () { graph.CheckMustAbort(); };
-        const auto paths = shortest_paths::DisjointKShortestPaths(graph_view, source_id, sink_id, K, abort_func);
+        std::vector<shortest_paths::Path<>> paths;
+        if (!score_property.empty()) {
+            const auto scores = GetScores(graph, graph_view, score_property, default_score);
+            paths = shortest_paths::PartialDisjointKShortestPaths(graph_view, source_id, sink_id, K, scores, cull_per_round, cull_ascending, abort_func);
+        } else {
+            paths = shortest_paths::DisjointKShortestPaths(graph_view, source_id, sink_id, K, abort_func);
+        }
 
         for (std::size_t path_index = 0; path_index < paths.size(); path_index++) {
             const auto& path = paths[path_index];
@@ -1342,8 +1355,11 @@ extern "C" int mgp_init_module(struct mgp_module *module, struct mgp_memory *mem
                 mgp::Parameter(shortest_paths::kArgumentTargetNode, mgp::Type::Node),
                 mgp::Parameter(shortest_paths::kArgumentK, mgp::Type::Int, 0L),
                 mgp::Parameter(shortest_paths::kArgumentRelationshipWeightProperty, mgp::Type::String, ""),
+                mgp::Parameter(shortest_paths::kArgumentRelationshipScoreProperty, mgp::Type::String, ""),
                 mgp::Parameter(shortest_paths::kArgumentDefaultWeight, mgp::Type::Double, 1.0),
-                mgp::Parameter(shortest_paths::kArgumentThreads, mgp::Type::Int, 0L),
+                mgp::Parameter(shortest_paths::kArgumentDefaultScore, mgp::Type::Double, 1.0),
+                mgp::Parameter(shortest_paths::kArgumentCullPerRound, mgp::Type::Int, 1L),
+                mgp::Parameter(shortest_paths::kArgumentCullAscending, mgp::Type::Bool, true)
             },
             {
                 mgp::Return(shortest_paths::kReturnIndex, mgp::Type::Int),

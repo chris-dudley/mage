@@ -28,6 +28,7 @@ constexpr const std::string_view kArgumentRelationshipScoreProperty = "relations
 constexpr const std::string_view kArgumentDefaultScore = "default_score";
 constexpr const std::string_view kArgumentCullAscending = "cull_ascending";
 constexpr const std::string_view kArgumentThreads = "threads";
+constexpr const std::string_view kArgumentCullPerRound = "cull_per_round";
 
 constexpr const std::string_view kReturnIndex = "index";
 constexpr const std::string_view kReturnSourceNode = "source_node";
