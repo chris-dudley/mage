@@ -1010,6 +1010,14 @@ TEST(ShortestPaths, JohnsonsKShortestSmallNegCycle) {
     ASSERT_TRUE(CheckPaths(paths, expected_paths));
 }
 
+TEST(ShortestPaths, DisjointEmptyGraph) {
+    auto G = mg_generate::BuildGraph(0, {});
+
+    auto paths = shortest_paths::DisjointKShortestPaths(*G, 0UL, 0UL, 0UL, check_abort_noop);
+
+    ASSERT_TRUE(paths.empty());
+}
+
 /*
  *                ┌───┐                          ┌───┐
  *   ┌──50───────►│ 2 ├─────────┬────────80─────►│ 4 │

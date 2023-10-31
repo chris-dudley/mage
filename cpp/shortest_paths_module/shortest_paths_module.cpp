@@ -5,6 +5,7 @@
 #include <string>
 #include <unordered_map>
 #include <ranges>
+#include <optional>
 
 #include "algorithm/shortest_path.hpp"
 #include "algorithm/dijkstra.hpp"
@@ -26,6 +27,13 @@ constexpr const int64_t ALGO_DIJKSTRA = 0;
 // I'm not sure why.
 uint64_t GetInnerNodeId(const mg_graph::GraphView<>& graph, uint64_t memgraph_id) {
     return graph.GetInnerNodeId(memgraph_id);
+}
+
+std::optional<uint64_t> GetInnerNodeIdOpt(const mg_graph::GraphView<>& graph, uint64_t memgraph_id) {
+    if (graph.NodeExists(memgraph_id)) {
+        return graph.GetInnerNodeId(memgraph_id);
+    }
+    return std::nullopt;
 }
 
 uint64_t GetInnerEdgeId(const mg_graph::GraphView<>& graph, uint64_t memgraph_id) {
@@ -157,8 +165,14 @@ void YensKShortestPaths(mgp_list *args, mgp_graph *memgraph_graph, mgp_result *r
         const auto source_mgid = source_node.Id().AsUint();
         const auto sink_mgid = sink_node.Id().AsUint();
 
-        const auto source_id = GetInnerNodeId(graph_view, source_mgid);
-        const auto sink_id = GetInnerNodeId(graph_view, sink_mgid);
+        const auto maybe_source_id = GetInnerNodeIdOpt(graph_view, source_mgid);
+        const auto maybe_sink_id = GetInnerNodeIdOpt(graph_view, sink_mgid);
+        if (!maybe_source_id || !maybe_sink_id) {
+            // Either source or sink is not in subgraph, so there can be no paths between them.
+            return;
+        }
+        const auto source_id = maybe_source_id.value();
+        const auto sink_id = maybe_sink_id.value();
 
         auto abort_func = [&graph] () { graph.CheckMustAbort(); };
         const auto paths = shortest_paths::KShortestPaths(graph_view, source_id, sink_id, K, abort_func, threads);
@@ -217,7 +231,12 @@ void BellmanFordProcedure(mgp_list *args, mgp_graph *memgraph_graph, mgp_result 
         const mg_graph::GraphView<>& graph_view = *graph_view_ptr;
 
         const auto source_mgid = source_node.Id().AsUint();
-        const auto source_id = GetInnerNodeId(graph_view, source_mgid);
+        const auto maybe_source_id = GetInnerNodeIdOpt(graph_view, source_mgid);
+        if (!maybe_source_id) {
+            // Source is not in subgraph, so there can be no paths from it.
+            return;
+        }
+        const auto source_id = maybe_source_id.value();
 
         shortest_paths::BellmanFordPathfinder<uint64_t> pathfinder(graph_view, source_id);
         if (pathfinder.has_negative_cycle()) {
@@ -341,9 +360,15 @@ void IterativeBellmanFordProcedure(mgp_list *args, mgp_graph *memgraph_graph, mg
 
 
         const auto source_mgid = source_node.Id().AsUint();
-        const auto source_id = GetInnerNodeId(graph_view, source_mgid);
         const auto target_mgid = target_node.Id().AsUint();
-        const auto target_id = GetInnerNodeId(graph_view, target_mgid);
+        const auto maybe_source_id = GetInnerNodeIdOpt(graph_view, source_mgid);
+        const auto maybe_target_id = GetInnerNodeIdOpt(graph_view, target_mgid);
+        if (!maybe_source_id || !maybe_target_id) {
+            // Either source or target is not in subgraph, so there can be no paths between them.
+            return;
+        }
+        const auto source_id = maybe_source_id.value();
+        const auto target_id = maybe_target_id.value();
         auto abort_func = [&graph] () { graph.CheckMustAbort(); };
 
         shortest_paths::IterativeBellmanFordPathfinder<uint64_t> pathfinder(scores, cull_ascending);
@@ -405,7 +430,12 @@ void IBF_SSSP(mgp_list *args, mgp_graph *memgraph_graph, mgp_result *result, mgp
         std::vector<double> scores = GetScores(graph, graph_view, score_property, default_score);
 
         const auto source_mgid = source_node.Id().AsUint();
-        const auto source_id = GetInnerNodeId(graph_view, source_mgid);
+        const auto maybe_source_id = GetInnerNodeIdOpt(graph_view, source_mgid);
+        if (!maybe_source_id) {
+            // Source is not in subgraph, so there can be no paths from it.
+            return;
+        }
+        const auto source_id = maybe_source_id.value();
         auto abort_func = [&graph] () { graph.CheckMustAbort(); };
 
         shortest_paths::IterativeBellmanFordPathfinder<uint64_t> pathfinder(scores, cull_ascending);
@@ -483,7 +513,18 @@ void IBF_SSSP_Subgraph(mgp_list *args, mgp_graph *memgraph_graph, mgp_result *re
         std::vector<double> scores = GetScores(graph, graph_view, score_property, default_score);
 
         const auto source_mgid = source_node.Id().AsUint();
-        const auto source_id = GetInnerNodeId(graph_view, source_mgid);
+        const auto maybe_source_id = GetInnerNodeIdOpt(graph_view, source_mgid);
+        if (!maybe_source_id) {
+            // Source not in (sub)graph, so resulting subgraph is empty.
+            auto record = record_factory.NewRecord();
+            record.Insert(std::string(shortest_paths::kReturnNodes).c_str(), mgp::List());
+            record.Insert(std::string(shortest_paths::kReturnEdges).c_str(), mgp::List());
+            record.Insert(std::string(shortest_paths::kReturnNumEdgesRemoved).c_str(), 0L);
+            record.Insert(std::string(shortest_paths::kReturnRemovedEdges).c_str(), mgp::List());
+            return;
+        }
+
+        const auto source_id = maybe_source_id.value();
         auto abort_func = [&graph] () { graph.CheckMustAbort(); };
 
         shortest_paths::IterativeBellmanFordPathfinder<uint64_t> pathfinder(scores, cull_ascending);
@@ -697,7 +738,11 @@ void Johnsons_Source_Subgraphs(mgp_list *args, mgp_graph *memgraph_graph, mgp_re
         std::unordered_set<uint64_t> source_ids;
         for (const auto& value : source_nodes) {
             auto node = value.ValueNode();
-            source_ids.emplace(GetInnerNodeId(graph_view, node.Id().AsUint()));
+            auto source_id = GetInnerNodeIdOpt(graph_view, node.Id().AsUint());
+            // Ignore sources not in subgraph
+            if (source_id) {
+                source_ids.emplace(source_id.value());
+            }
         }
         // If no nodes specified, search all
         if (source_ids.empty()) {
@@ -792,7 +837,11 @@ void Johnsons_Paths(mgp_list *args, mgp_graph *memgraph_graph, mgp_result *resul
         std::unordered_set<uint64_t> source_ids;
         for (const auto& value : source_nodes) {
             auto node = value.ValueNode();
-            source_ids.emplace(GetInnerNodeId(graph_view, node.Id().AsUint()));
+            auto source_id = GetInnerNodeIdOpt(graph_view, node.Id().AsUint());
+            // Ignore sources not in subgraph
+            if (source_id) {
+                source_ids.emplace(source_id.value());
+            }
         }
         // If no nodes specified, search all
         if (source_ids.empty()) {
@@ -804,7 +853,11 @@ void Johnsons_Paths(mgp_list *args, mgp_graph *memgraph_graph, mgp_result *resul
         std::unordered_set<uint64_t> target_ids;
         for (const auto& value : target_nodes) {
             auto node = value.ValueNode();
-            target_ids.emplace(GetInnerNodeId(graph_view, node.Id().AsUint()));
+            auto target_id = GetInnerNodeIdOpt(graph_view, node.Id().AsUint());
+            // Ignore targets not in subgraph
+            if (target_id) {
+                target_ids.emplace(target_id.value());
+            }
         }
         // If no nodes specified, target all
         if (target_ids.empty()) {
@@ -909,8 +962,14 @@ void Johnsons_K_Shortest(mgp_list *args, mgp_graph *memgraph_graph, mgp_result *
 
         const auto source_mgid = source_node.Id().AsUint();
         const auto target_mgid = target_node.Id().AsUint();
-        const auto source_id = GetInnerNodeId(graph_view, source_mgid);
-        const auto target_id = GetInnerNodeId(graph_view, target_mgid);
+        const auto maybe_source_id = GetInnerNodeIdOpt(graph_view, source_mgid);
+        const auto maybe_target_id = GetInnerNodeIdOpt(graph_view, target_mgid);
+        if (!maybe_source_id || !maybe_target_id) {
+            // Either source or target is not in subgraph, so there can be no paths between them.
+            return;
+        }
+        const auto source_id = maybe_source_id.value();
+        const auto target_id = maybe_target_id.value();
 
         auto abort_func = [&graph] () { graph.CheckMustAbort(); };
 
@@ -999,8 +1058,14 @@ void Johnsons_Disjoint_K_Shortest(mgp_list *args, mgp_graph *memgraph_graph, mgp
 
         const auto source_mgid = source_node.Id().AsUint();
         const auto target_mgid = target_node.Id().AsUint();
-        const auto source_id = GetInnerNodeId(graph_view, source_mgid);
-        const auto target_id = GetInnerNodeId(graph_view, target_mgid);
+        const auto maybe_source_id = GetInnerNodeIdOpt(graph_view, source_mgid);
+        const auto maybe_target_id = GetInnerNodeIdOpt(graph_view, target_mgid);
+        if (!maybe_source_id || !maybe_target_id) {
+            // Either source or target is not in subgraph, so there can be no paths between them.
+            return;
+        }
+        const auto source_id = maybe_source_id.value();
+        const auto target_id = maybe_target_id.value();
 
         auto abort_func = [&graph] () { graph.CheckMustAbort(); };
 
@@ -1094,8 +1159,14 @@ void DisjointKShortestPaths(mgp_list *args, mgp_graph *memgraph_graph, mgp_resul
         const auto source_mgid = source_node.Id().AsUint();
         const auto sink_mgid = sink_node.Id().AsUint();
 
-        const auto source_id = GetInnerNodeId(graph_view, source_mgid);
-        const auto sink_id = GetInnerNodeId(graph_view, sink_mgid);
+        const auto maybe_source_id = GetInnerNodeIdOpt(graph_view, source_mgid);
+        const auto maybe_sink_id = GetInnerNodeIdOpt(graph_view, sink_mgid);
+        if (!maybe_source_id || !maybe_sink_id) {
+            // Either source or sink is not in subgraph, so there can be no paths between them.
+            return;
+        }
+        const auto source_id = maybe_source_id.value();
+        const auto sink_id = maybe_sink_id.value();
 
         auto abort_func = [&graph] () { graph.CheckMustAbort(); };
         std::vector<shortest_paths::Path<>> paths;
