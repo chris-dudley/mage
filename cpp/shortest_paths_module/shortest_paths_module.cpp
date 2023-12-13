@@ -106,7 +106,7 @@ mgp::List TranslateEdgeList(const mgp::Graph& graph, const mg_graph::GraphView<>
         auto mgid = GetMemgraphEdgeId(graph_view, edge_ids[index]);
         mgid_to_index.emplace(mgid, index);
     }
-    for (auto& edge : graph.Relationships()) {
+    for (auto edge : graph.Relationships()) {
         auto range = mgid_to_index.equal_range(edge.Id().AsUint());
         for (auto it = range.first; it != range.second; it++) {
             edges[it->second] = mgp::Value(edge);
