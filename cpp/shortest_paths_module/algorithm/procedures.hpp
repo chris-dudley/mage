@@ -15,6 +15,7 @@ constexpr const std::string_view kProcedureJohnsonsPaths = "johnsons_paths";
 constexpr const std::string_view kProcedureJohnsonsKShortest = "johnsons_k_shortest";
 constexpr const std::string_view kProcedureJohnsonsDisjointKShortest = "johnsons_disjoint_k_shortest";
 constexpr const std::string_view kProcedureDisjointKShortest = "disjoint_k_shortest";
+constexpr const std::string_view kProcedureSuccessiveShortestPaths = "successive_shortest_paths";
 
 constexpr const std::string_view kArgumentSourceNode = "source_node";
 constexpr const std::string_view kArgumentSourceNodes = "source_nodes";
@@ -29,6 +30,11 @@ constexpr const std::string_view kArgumentDefaultScore = "default_score";
 constexpr const std::string_view kArgumentCullAscending = "cull_ascending";
 constexpr const std::string_view kArgumentThreads = "threads";
 constexpr const std::string_view kArgumentCullPerRound = "cull_per_round";
+constexpr const std::string_view kArgumentFlowIn = "flow_in";
+constexpr const std::string_view kArgumentRelationshipCapacityProperty = "relationship_capacity_property";
+constexpr const std::string_view kArgumentDefaultCapacity = "default_capacity";
+constexpr const std::string_view kArgumentFlowConversion = "flow_conversion";
+constexpr const std::string_view kArgumentEpsilon = "epsilon";
 
 constexpr const std::string_view kReturnIndex = "index";
 constexpr const std::string_view kReturnSourceNode = "source_node";
@@ -43,5 +49,7 @@ constexpr const std::string_view kReturnNodes = "nodes";
 constexpr const std::string_view kReturnEdges = "edges";
 constexpr const std::string_view kReturnNodeWeights = "node_weights";
 constexpr const std::string_view kReturnEdgeWeights = "edge_weights";
+constexpr const std::string_view kReturnFlows = "flows";
+constexpr const std::string_view kReturnPathInputFlow = "path_input_flow";
 
 } // namespace shortest_paths

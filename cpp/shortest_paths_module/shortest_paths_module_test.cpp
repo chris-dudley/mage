@@ -16,6 +16,7 @@
 #include "algorithm/iterative_bf.hpp"
 #include "algorithm/johnsons.hpp"
 #include "algorithm/disjoint.hpp"
+#include "algorithm/successive_shortest_paths.hpp"
 
 void check_abort_noop() {}
 
@@ -1101,6 +1102,318 @@ TEST(ShortestPaths, PartialDisjointSmallAcyclicGraph) {
     // Could technically just compare the vectors, but this gives more useful output.
     ASSERT_EQ(paths.size(), expected_paths.size());
     ASSERT_TRUE(CheckPaths(paths, expected_paths));
+}
+
+TEST(ShortestPaths, SSP_EmptyGraph) {
+    auto G = mg_generate::BuildGraph(0, {});
+
+    shortest_paths::SuccessiveShortestPathsPathfinder<uint64_t> pathfinder;
+    std::vector<double> capacities;
+    auto paths = pathfinder.search(*G, 0, 0, 0.0, capacities, 0.001, shortest_paths::FlowConversion::None, check_abort_noop);
+
+    ASSERT_TRUE(paths.empty());
+}
+
+/* Edges marked as weight:capacity
+ *
+ *       ┌───2:30────┐
+ *       │           │
+ *       │           │
+ * ┌───┐ │           │  ┌───┐               ┌───┐
+ * │ 0 ├─┼───1:20────┼─►│ 1 ├─────1:110────►│ 2 │
+ * └───┘ │           │  └───┘               └───┘
+ *       │           │
+ *       │           │
+ *       └───3:60────┘
+ */
+TEST(ShortestPaths, SSP_SmallGraphNoConv) {
+    auto G = mg_generate::BuildWeightedGraph(
+        3,
+        {
+            /*0*/ {{0, 1}, 2.0},
+            /*1*/ {{0, 1}, 1.0},
+            /*2*/ {{0, 1}, 3.0},
+            /*3*/ {{1, 2}, 1.0},
+        },
+        mg_graph::GraphType::kDirectedGraph
+    );
+
+    using EdgesAndFlows = std::pair<std::vector<uint64_t>, std::vector<double>>;
+    using EdgesAndFlowsVec = std::vector<EdgesAndFlows>;
+
+    const EdgesAndFlowsVec expected_max_flow = {
+        {/*edges*/ {1, 3}, /*flows*/ {20.0, 20.0, 20.0}},
+        {/*edges*/ {0, 3}, /*flows*/ {30.0, 30.0, 30.0}},
+        {/*edges*/ {2, 3}, /*flows*/ {60.0, 60.0, 60.0}},
+    };
+
+    const std::vector<double> capacities = {30.0, 20.0, 60.0, 110.0};
+    const double EPSILON = 1.0e-6;
+
+    shortest_paths::SuccessiveShortestPathsPathfinder<uint64_t> pathfinder;
+    // Search with flow_in = max flow for graph
+    auto paths = pathfinder.search(
+        *G, 0, 2, 110.0, capacities,
+        EPSILON, shortest_paths::FlowConversion::None, check_abort_noop
+    );
+
+    ASSERT_EQ(paths.size(), expected_max_flow.size());
+    for (size_t i = 0; i < paths.size(); i++) {
+        ASSERT_EQ(paths[i].first.edges, expected_max_flow[i].first);
+        ASSERT_EQ(paths[i].second, expected_max_flow[i].second);
+    }
+
+    // Search with flow_in > max flow for graph, result should be identical to
+    // previous.
+    paths = pathfinder.search(
+        *G, 0, 2, 100000.0, capacities,
+        EPSILON, shortest_paths::FlowConversion::None, check_abort_noop
+    );
+
+    ASSERT_EQ(paths.size(), expected_max_flow.size());
+    for (size_t i = 0; i < paths.size(); i++) {
+        ASSERT_EQ(paths[i].first.edges, expected_max_flow[i].first);
+        ASSERT_EQ(paths[i].second, expected_max_flow[i].second);
+    }
+
+    // Search with flow_in = 100, should not fully utilize edge 2.
+    const EdgesAndFlowsVec expected_flow_100 = {
+        {/*edges*/ {1, 3}, /*flows*/ {20.0, 20.0, 20.0}},
+        {/*edges*/ {0, 3}, /*flows*/ {30.0, 30.0, 30.0}},
+        {/*edges*/ {2, 3}, /*flows*/ {50.0, 50.0, 50.0}},
+    };
+
+    paths = pathfinder.search(
+        *G, 0, 2, 100.0, capacities,
+        EPSILON, shortest_paths::FlowConversion::None, check_abort_noop
+    );
+
+    ASSERT_EQ(paths.size(), expected_flow_100.size());
+    for (size_t i = 0; i < paths.size(); i++) {
+        ASSERT_EQ(paths[i].first.edges, expected_flow_100[i].first);
+        ASSERT_EQ(paths[i].second, expected_flow_100[i].second);
+    }
+
+    // Search with flow_in = 50, should ignore edge 2 entirely
+    const EdgesAndFlowsVec expected_flow_50 = {
+        {/*edges*/ {1, 3}, /*flows*/ {20.0, 20.0, 20.0}},
+        {/*edges*/ {0, 3}, /*flows*/ {30.0, 30.0, 30.0}},
+    };
+
+    paths = pathfinder.search(
+        *G, 0, 2, 50.0, capacities,
+        EPSILON, shortest_paths::FlowConversion::None, check_abort_noop
+    );
+
+    ASSERT_EQ(paths.size(), expected_flow_50.size());
+    for (size_t i = 0; i < paths.size(); i++) {
+        ASSERT_EQ(paths[i].first.edges, expected_flow_50[i].first);
+        ASSERT_EQ(paths[i].second, expected_flow_50[i].second);
+    }
+}
+
+/* Edges marked as weight:capacity
+ *
+ *       ┌───2:30────┐
+ *       │           │
+ *       │           │
+ * ┌───┐ │           │  ┌───┐               ┌───┐
+ * │ 0 ├─┼───1:20────┼─►│ 1 ├─────1:110────►│ 2 │
+ * └───┘ │           │  └───┘               └───┘
+ *       │           │
+ *       │           │
+ *       └───3:60────┘
+ * 
+ * Tests for this one assume the weight acts as a conversion factor for flows
+ * over that edge (# units out per unit in).
+ * If a weight is 2, that means you get 2 units of output for each
+ * unit of input.
+ * 
+ * Capacities are assumed to be in terms of the input to the edge.
+ */
+TEST(ShortestPaths, SSP_SmallGraphConv_TargetOverSource) {
+    auto G = mg_generate::BuildWeightedGraph(
+        3,
+        {
+            /*0*/ {{0, 1}, 2.0},
+            /*1*/ {{0, 1}, 1.0},
+            /*2*/ {{0, 1}, 3.0},
+            /*3*/ {{1, 2}, 1.0},
+        },
+        mg_graph::GraphType::kDirectedGraph
+    );
+
+    using EdgesAndFlows = std::pair<std::vector<uint64_t>, std::vector<double>>;
+    using EdgesAndFlowsVec = std::vector<EdgesAndFlows>;
+
+    const std::vector<double> capacities = {30.0, 20.0, 60.0, 110.0};
+    const double EPSILON = 1.0e-6;
+    const auto CONV_MODE = shortest_paths::FlowConversion::TargetOverSource;
+
+    shortest_paths::SuccessiveShortestPathsPathfinder<uint64_t> pathfinder;
+
+    // Search with flow_in = max flow for graph
+    const EdgesAndFlowsVec expected_max_flow = {
+        {/*edges*/ {1, 3}, /*flows*/ {20.0, 20.0, 20.0}},
+        {/*edges*/ {0, 3}, /*flows*/ {30.0, 60.0, 60.0}},
+        {/*edges*/ {2, 3}, /*flows*/ {10.0, 30.0, 30.0}},
+    };
+
+    double max_flow_in = 0.0;
+    for (const auto& info : expected_max_flow) {
+        max_flow_in += info.second[0];
+    }
+    auto paths = pathfinder.search(
+        *G, 0, 2, max_flow_in, capacities,
+        EPSILON, CONV_MODE, check_abort_noop
+    );
+
+    ASSERT_EQ(paths.size(), expected_max_flow.size());
+    for (size_t i = 0; i < paths.size(); i++) {
+        ASSERT_EQ(paths[i].first.edges, expected_max_flow[i].first);
+        ASSERT_EQ(paths[i].second, expected_max_flow[i].second);
+    }
+
+    // Search with flow_in > max flow for graph, result should be identical to
+    // previous.
+    paths = pathfinder.search(
+        *G, 0, 2, max_flow_in * 2, capacities,
+        EPSILON, CONV_MODE, check_abort_noop
+    );
+
+    ASSERT_EQ(paths.size(), expected_max_flow.size());
+    for (size_t i = 0; i < paths.size(); i++) {
+        ASSERT_EQ(paths[i].first.edges, expected_max_flow[i].first);
+        ASSERT_EQ(paths[i].second, expected_max_flow[i].second);
+    }
+
+    // Search with flow_in = 50, should ignore edge 2 entirely
+    const EdgesAndFlowsVec expected_flow_2_paths = {
+        {/*edges*/ {1, 3}, /*flows*/ {20.0, 20.0, 20.0}},
+        {/*edges*/ {0, 3}, /*flows*/ {30.0, 60.0, 60.0}},
+    };
+
+    paths = pathfinder.search(
+        *G, 0, 2, 50.0, capacities,
+        EPSILON, CONV_MODE, check_abort_noop
+    );
+
+    ASSERT_EQ(paths.size(), expected_flow_2_paths.size());
+    for (size_t i = 0; i < paths.size(); i++) {
+        ASSERT_EQ(paths[i].first.edges, expected_flow_2_paths[i].first);
+        ASSERT_EQ(paths[i].second, expected_flow_2_paths[i].second);
+    }
+}
+
+/* Edges marked as weight:capacity
+ *
+ *       ┌───2:30────┐
+ *       │           │
+ *       │           │
+ * ┌───┐ │           │  ┌───┐               ┌───┐
+ * │ 0 ├─┼───1:20────┼─►│ 1 ├─────2:110────►│ 2 │
+ * └───┘ │           │  └───┘               └───┘
+ *       │           │
+ *       │           │
+ *       └───3:60────┘
+ * 
+ * Tests for this one assume the weight acts as a conversion factor for flows
+ * over that edge, (# units in per unit out).
+ * If a weight is 2, that means you need 2 units of input for each
+ * unit of output.
+ * 
+ * Capacities are assumed to be in terms of the input to the edge.
+ */
+TEST(ShortestPaths, SSP_SmallGraphConv_SourceOverTarget) {
+    auto G = mg_generate::BuildWeightedGraph(
+        3,
+        {
+            /*0*/ {{0, 1}, 2.0},
+            /*1*/ {{0, 1}, 1.0},
+            /*2*/ {{0, 1}, 3.0},
+            /*3*/ {{1, 2}, 2.0},
+        },
+        mg_graph::GraphType::kDirectedGraph
+    );
+
+    using EdgesAndFlows = std::pair<std::vector<uint64_t>, std::vector<double>>;
+    using EdgesAndFlowsVec = std::vector<EdgesAndFlows>;
+
+    const std::vector<double> capacities = {30.0, 20.0, 60.0, 110.0};
+    const double EPSILON = 1.0e-6;
+    const auto CONV_MODE = shortest_paths::FlowConversion::SourceOverTarget;
+
+    shortest_paths::SuccessiveShortestPathsPathfinder<uint64_t> pathfinder;
+
+    // Search with flow_in = max flow for graph
+    const EdgesAndFlowsVec expected_max_flow = {
+        {/*edges*/ {1, 3}, /*flows*/ {20.0, 20.0, 10.0}},
+        {/*edges*/ {0, 3}, /*flows*/ {30.0, 15.0, 7.5}},
+        {/*edges*/ {2, 3}, /*flows*/ {60.0, 20.0, 10.0}},
+    };
+
+    double max_flow_in = 0.0;
+    for (const auto& info : expected_max_flow) {
+        max_flow_in += info.second[0];
+    }
+    auto paths = pathfinder.search(
+        *G, 0, 2, max_flow_in, capacities,
+        EPSILON, CONV_MODE, check_abort_noop
+    );
+
+    ASSERT_EQ(paths.size(), expected_max_flow.size());
+    for (size_t i = 0; i < paths.size(); i++) {
+        ASSERT_EQ(paths[i].first.edges, expected_max_flow[i].first);
+        ASSERT_EQ(paths[i].second, expected_max_flow[i].second);
+    }
+
+    // Search with flow_in > max flow for graph, result should be identical to
+    // previous.
+    paths = pathfinder.search(
+        *G, 0, 2, max_flow_in * 2, capacities,
+        EPSILON, CONV_MODE, check_abort_noop
+    );
+
+    ASSERT_EQ(paths.size(), expected_max_flow.size());
+    for (size_t i = 0; i < paths.size(); i++) {
+        ASSERT_EQ(paths[i].first.edges, expected_max_flow[i].first);
+        ASSERT_EQ(paths[i].second, expected_max_flow[i].second);
+    }
+
+    // Search with flow_in = 95, should not fully utilize edge 2.
+    const EdgesAndFlowsVec expected_flow_under_max = {
+        {/*edges*/ {1, 3}, /*flows*/ {20.0, 20.0, 10.0}},
+        {/*edges*/ {0, 3}, /*flows*/ {30.0, 15.0, 7.5}},
+        {/*edges*/ {2, 3}, /*flows*/ {45.0, 15.0, 7.5}},
+    };
+
+    paths = pathfinder.search(
+        *G, 0, 2, 95.0, capacities,
+        EPSILON, CONV_MODE, check_abort_noop
+    );
+
+    ASSERT_EQ(paths.size(), expected_flow_under_max.size());
+    for (size_t i = 0; i < paths.size(); i++) {
+        ASSERT_EQ(paths[i].first.edges, expected_flow_under_max[i].first);
+        ASSERT_EQ(paths[i].second, expected_flow_under_max[i].second);
+    }
+
+    // Search with flow_in = 50, should ignore edge 2 entirely
+    const EdgesAndFlowsVec expected_flow_2_paths = {
+        {/*edges*/ {1, 3}, /*flows*/ {20.0, 20.0, 10.0}},
+        {/*edges*/ {0, 3}, /*flows*/ {30.0, 15.0, 7.5}},
+    };
+
+    paths = pathfinder.search(
+        *G, 0, 2, 50.0, capacities,
+        EPSILON, CONV_MODE, check_abort_noop
+    );
+
+    ASSERT_EQ(paths.size(), expected_flow_2_paths.size());
+    for (size_t i = 0; i < paths.size(); i++) {
+        ASSERT_EQ(paths[i].first.edges, expected_flow_2_paths[i].first);
+        ASSERT_EQ(paths[i].second, expected_flow_2_paths[i].second);
+    }
 }
 
 int main(int argc, char **argv) {

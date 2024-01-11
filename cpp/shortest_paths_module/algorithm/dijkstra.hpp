@@ -6,6 +6,7 @@
 #include <ranges>
 #include <stdexcept>
 
+#include <fmt/core.h>
 #include <mg_graph.hpp>
 #include <boost/heap/fibonacci_heap.hpp>
 
@@ -29,6 +30,8 @@ public:
     using NodeIdVec = std::vector<TSize>;
     /// @brief A vector of edges by ID.
     using EdgeIdVec = std::vector<TSize>;
+    /// @brief A vector containing weights for each edge, indexed by ID.
+    using WeightVec = std::vector<double>;
 
     /// @brief Infinite distance used for unreachable nodes.
     static constexpr const double POSITIVE_INFINITY = std::numeric_limits<double>::infinity();
@@ -158,6 +161,68 @@ public:
         do_search(graph, ignored_edges, ignored_nodes, check_abort);
     }
 
+    /// @brief Resets the state of the pathfinder and then searches for the shorest paths on `graph` from `source`
+    ///     to `target`, if such a path exists. Uses the given edge weights instead of those stored in
+    ///     the graph view.
+    /// @param graph The graph to search.
+    /// @param source The ID of the source node.
+    /// @param target The ID of the target node.
+    /// @param weights The weights of each edge, indexed by ID.
+    /// @param ignored_edges Set of edge IDs to ignore during pathfinding.
+    /// @param ignored_nodes Set of node IDs to ignore during pathfinding.
+    /// @param check_abort Function that should throw an exception if execution should be aborted.
+    /// @throws std::invalid_argument if the source or target nodes are not in the graph.
+    void search_with_weights(
+        const GraphViewType& graph, TSize source, TSize target,
+        const WeightVec& weights,
+        const CheckAbortFunc &check_abort = CheckAbortNoop
+    ) {
+        EdgeIdSet empty_edges;
+        NodeIdSet empty_nodes;
+        search_with_weights(graph, source, target, weights, empty_edges, empty_nodes);
+    }
+
+    /// @brief Resets the state of the pathfinder and then searches for the shorest paths on `graph` from `source`
+    ///     to `target`, if such a path exists. Uses the given edge weights instead of those stored in
+    ///     the graph view.
+    /// @param graph The graph to search.
+    /// @param source The ID of the source node.
+    /// @param target The ID of the target node.
+    /// @param weights The weights of each edge, indexed by ID.
+    /// @param ignored_edges Set of edge IDs to ignore during pathfinding.
+    /// @param ignored_nodes Set of node IDs to ignore during pathfinding.
+    /// @param check_abort Function that should throw an exception if execution should be aborted.
+    /// @throws std::invalid_argument if the source or target nodes are not in the graph.
+    void search_with_weights(
+        const GraphViewType& graph, TSize source, TSize target,
+        const WeightVec& weights,
+        const EdgeIdSet& ignored_edges, const NodeIdSet& ignored_nodes,
+        const CheckAbortFunc &check_abort = CheckAbortNoop
+    ) {
+        const TSize num_nodes = graph.Nodes().size();
+        const TSize num_edges = graph.Edges().size();
+        reset(num_nodes, source, target);
+
+        if (num_nodes == 0) {
+            // Empty graph, no paths to find
+            return;
+        }
+
+        if (source >= num_nodes) {
+            throw std::invalid_argument("source node not in graph");
+        }
+        if (target >= num_nodes) {
+            throw std::invalid_argument("target not node in graph");
+        }
+        if (weights.size() < num_edges) {
+            throw std::invalid_argument(fmt::format(
+                "not enough edge weights given: {} weights < {} edges",
+                weights.size(), num_edges
+            ));
+        }
+        do_search(graph, weights, ignored_edges, ignored_nodes, check_abort);
+    }
+
     /// @brief Returns the number of reachable nodes in the graph, including the source.
     size_t num_reachable_nodes() const {
         size_t result = 0;
@@ -272,6 +337,38 @@ private:
         }
     }
 
+    // Perform search with given edge weights instead of graph's weights.
+    void do_search(
+        const GraphViewType& graph, const WeightVec& weights,
+        const EdgeIdSet& ignored_edges, const NodeIdSet& ignored_nodes,
+        const CheckAbortFunc &check_abort
+    ) {
+        dist_to[source_id] = 0.0;
+
+        HeapType node_queue;
+        // Seed queue with source node
+        node_queue.emplace(source_id, 0.0);
+
+        while (!node_queue.empty()) {
+            check_abort();
+
+            auto current_node = node_queue.top().node_id;
+            node_queue.pop();
+            if (added[current_node]) {
+                // Don't revisit nodes
+                continue;
+            }
+            added[current_node] = true;
+
+            if (target_id.has_value() && target_id.value() == current_node) {
+                // Found the target, can stop early
+                break;
+            }
+
+            relax(graph, current_node, node_queue, weights, ignored_edges, ignored_nodes);
+        }
+    }
+
     void relax(
         const GraphViewType& graph, TSize current_node, HeapType& node_queue,
         const EdgeIdSet& ignored_edges, const NodeIdSet& ignored_nodes
@@ -284,6 +381,32 @@ private:
             }
             auto next_node = neighbor.node_id;
             double edge_weight = graph.IsWeighted() ? graph.GetWeight(neighbor.edge_id) : 1.0;
+            double dist_to_next = dist_to[current_node] + edge_weight;
+
+            if (dist_to[next_node] > (dist_to_next + EPSILON)) {
+                dist_to[next_node] = dist_to_next;
+
+                parent[next_node] = current_node;
+                edge_into[next_node] = neighbor.edge_id;
+                node_queue.emplace(next_node, dist_to_next);
+            }
+        }
+    }
+
+    // Relaxation with given set of weights instead of using graph's weights.
+    void relax(
+        const GraphViewType& graph, TSize current_node, HeapType& node_queue,
+        const WeightVec& weights,
+        const EdgeIdSet& ignored_edges, const NodeIdSet& ignored_nodes
+    ) {
+        for (const auto& neighbor : graph.OutNeighbours(current_node)) {
+            // Don't update parent + edge in if we've already added the neighbor to the shortest path,
+            // or we should ignore the edge or neighbor node.
+            if (added[neighbor.node_id] || ignored_edges.contains(neighbor.edge_id) || ignored_nodes.contains(neighbor.node_id)) {
+                continue;
+            }
+            auto next_node = neighbor.node_id;
+            double edge_weight = weights[neighbor.edge_id];
             double dist_to_next = dist_to[current_node] + edge_weight;
 
             if (dist_to[next_node] > (dist_to_next + EPSILON)) {
