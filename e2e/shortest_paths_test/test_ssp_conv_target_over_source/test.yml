@@ -1,0 +1,52 @@
+query: >-
+    MATCH (source:Node{id: 0}), (target:Node{id: 2})
+    CALL shortest_paths.successive_shortest_paths(source, target, 60.0, 'weight', 'capacity', 1.0, 0.0, 'target/source')
+    YIELD
+      index,
+      source_node,
+      target_node,
+      total_cost,
+      costs,
+      path_input_flow,
+      flows,
+      path
+    RETURN
+      index,
+      source_node.id AS source_id,
+      target_node.id AS target_id,
+      total_cost,
+      costs,
+      path_input_flow,
+      flows,
+      extract(n IN nodes(path) | n.id) AS node_ids,
+      extract(r IN relationships(path) | r.id) AS edge_ids
+    ORDER BY index;
+
+output:
+  - index: 0
+    source_id: 0
+    target_id: 2
+    total_cost: 2
+    costs: [0, 1, 2]
+    path_input_flow: 20
+    flows: [20, 20, 20]
+    node_ids: [0, 1, 2]
+    edge_ids: [1, 3]
+  - index: 1
+    source_id: 0
+    target_id: 2
+    total_cost: 3
+    costs: [0, 2, 3]
+    path_input_flow: 30
+    flows: [30, 60, 60]
+    node_ids: [0, 1, 2]
+    edge_ids: [0, 3]
+  - index: 2
+    source_id: 0
+    target_id: 2
+    total_cost: 4
+    costs: [0, 3, 4]
+    path_input_flow: 10
+    flows: [10, 30, 30]
+    node_ids: [0, 1, 2]
+    edge_ids: [2, 3]

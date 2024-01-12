@@ -25,6 +25,7 @@ RUN apt-get update && apt-get install -y \
     clang           `mage-memgraph` \
     git             `mage-memgraph` \
     unixodbc-dev        `mage-memgraph` \
+    libboost-all-dev `mage-memgraph` \
     --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
