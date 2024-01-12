@@ -1109,7 +1109,12 @@ TEST(ShortestPaths, SSP_EmptyGraph) {
 
     shortest_paths::SuccessiveShortestPathsPathfinder<uint64_t> pathfinder;
     std::vector<double> capacities;
-    auto paths = pathfinder.search(*G, 0, 0, 0.0, capacities, 0.001, shortest_paths::FlowConversion::None, check_abort_noop);
+    std::vector<double> factors;
+    auto paths = pathfinder.search(
+        *G, 0, 0, 0.0,
+        capacities, factors,
+        0.001, shortest_paths::FlowConversion::None, check_abort_noop
+    );
 
     ASSERT_TRUE(paths.empty());
 }
@@ -1148,12 +1153,13 @@ TEST(ShortestPaths, SSP_SmallGraphNoConv) {
     };
 
     const std::vector<double> capacities = {30.0, 20.0, 60.0, 110.0};
+    const std::vector<double> factors; // Empty, not needed
     const double EPSILON = 1.0e-6;
 
     shortest_paths::SuccessiveShortestPathsPathfinder<uint64_t> pathfinder;
     // Search with flow_in = max flow for graph
     auto paths = pathfinder.search(
-        *G, 0, 2, 110.0, capacities,
+        *G, 0, 2, 110.0, capacities, factors,
         EPSILON, shortest_paths::FlowConversion::None, check_abort_noop
     );
 
@@ -1166,7 +1172,7 @@ TEST(ShortestPaths, SSP_SmallGraphNoConv) {
     // Search with flow_in > max flow for graph, result should be identical to
     // previous.
     paths = pathfinder.search(
-        *G, 0, 2, 100000.0, capacities,
+        *G, 0, 2, 100000.0, capacities, factors,
         EPSILON, shortest_paths::FlowConversion::None, check_abort_noop
     );
 
@@ -1184,7 +1190,7 @@ TEST(ShortestPaths, SSP_SmallGraphNoConv) {
     };
 
     paths = pathfinder.search(
-        *G, 0, 2, 100.0, capacities,
+        *G, 0, 2, 100.0, capacities, factors,
         EPSILON, shortest_paths::FlowConversion::None, check_abort_noop
     );
 
@@ -1201,7 +1207,7 @@ TEST(ShortestPaths, SSP_SmallGraphNoConv) {
     };
 
     paths = pathfinder.search(
-        *G, 0, 2, 50.0, capacities,
+        *G, 0, 2, 50.0, capacities, factors,
         EPSILON, shortest_paths::FlowConversion::None, check_abort_noop
     );
 
@@ -1250,6 +1256,12 @@ TEST(ShortestPaths, SSP_SmallGraphConv_TargetOverSource) {
     const double EPSILON = 1.0e-6;
     const auto CONV_MODE = shortest_paths::FlowConversion::TargetOverSource;
 
+    // Set factors to weights for convenience
+    std::vector<double> factors(G->Edges().size());
+    for (uint64_t i = 0; i < G->Edges().size(); i++) {
+        factors[i] = G->GetWeight(i);
+    }
+
     shortest_paths::SuccessiveShortestPathsPathfinder<uint64_t> pathfinder;
 
     // Search with flow_in = max flow for graph
@@ -1264,7 +1276,7 @@ TEST(ShortestPaths, SSP_SmallGraphConv_TargetOverSource) {
         max_flow_in += info.second[0];
     }
     auto paths = pathfinder.search(
-        *G, 0, 2, max_flow_in, capacities,
+        *G, 0, 2, max_flow_in, capacities, factors,
         EPSILON, CONV_MODE, check_abort_noop
     );
 
@@ -1277,7 +1289,7 @@ TEST(ShortestPaths, SSP_SmallGraphConv_TargetOverSource) {
     // Search with flow_in > max flow for graph, result should be identical to
     // previous.
     paths = pathfinder.search(
-        *G, 0, 2, max_flow_in * 2, capacities,
+        *G, 0, 2, max_flow_in * 2, capacities, factors,
         EPSILON, CONV_MODE, check_abort_noop
     );
 
@@ -1294,7 +1306,7 @@ TEST(ShortestPaths, SSP_SmallGraphConv_TargetOverSource) {
     };
 
     paths = pathfinder.search(
-        *G, 0, 2, 50.0, capacities,
+        *G, 0, 2, 50.0, capacities, factors,
         EPSILON, CONV_MODE, check_abort_noop
     );
 
@@ -1343,6 +1355,12 @@ TEST(ShortestPaths, SSP_SmallGraphConv_SourceOverTarget) {
     const double EPSILON = 1.0e-6;
     const auto CONV_MODE = shortest_paths::FlowConversion::SourceOverTarget;
 
+    // Set factors to weights for convenience
+    std::vector<double> factors(G->Edges().size());
+    for (uint64_t i = 0; i < G->Edges().size(); i++) {
+        factors[i] = G->GetWeight(i);
+    }
+
     shortest_paths::SuccessiveShortestPathsPathfinder<uint64_t> pathfinder;
 
     // Search with flow_in = max flow for graph
@@ -1357,7 +1375,7 @@ TEST(ShortestPaths, SSP_SmallGraphConv_SourceOverTarget) {
         max_flow_in += info.second[0];
     }
     auto paths = pathfinder.search(
-        *G, 0, 2, max_flow_in, capacities,
+        *G, 0, 2, max_flow_in, capacities, factors,
         EPSILON, CONV_MODE, check_abort_noop
     );
 
@@ -1370,7 +1388,7 @@ TEST(ShortestPaths, SSP_SmallGraphConv_SourceOverTarget) {
     // Search with flow_in > max flow for graph, result should be identical to
     // previous.
     paths = pathfinder.search(
-        *G, 0, 2, max_flow_in * 2, capacities,
+        *G, 0, 2, max_flow_in * 2, capacities, factors,
         EPSILON, CONV_MODE, check_abort_noop
     );
 
@@ -1388,7 +1406,7 @@ TEST(ShortestPaths, SSP_SmallGraphConv_SourceOverTarget) {
     };
 
     paths = pathfinder.search(
-        *G, 0, 2, 95.0, capacities,
+        *G, 0, 2, 95.0, capacities, factors,
         EPSILON, CONV_MODE, check_abort_noop
     );
 
@@ -1405,7 +1423,7 @@ TEST(ShortestPaths, SSP_SmallGraphConv_SourceOverTarget) {
     };
 
     paths = pathfinder.search(
-        *G, 0, 2, 50.0, capacities,
+        *G, 0, 2, 50.0, capacities, factors,
         EPSILON, CONV_MODE, check_abort_noop
     );
 

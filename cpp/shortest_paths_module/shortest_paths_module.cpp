@@ -1211,8 +1211,8 @@ void SuccessiveShortestPaths(mgp_list *args, mgp_graph *memgraph_graph, mgp_resu
     // Indicies in the arguments list for parameters
     enum ArgIdx : size_t {
         Source, Target, FlowIn,
-        WeightProp, CapacityProp,
-        DefaultWeight, DefaultCapacity,
+        WeightProp, CapacityProp, FactorProp,
+        DefaultWeight, DefaultCapacity, DefaultFactor,
         FlowConversion, Epsilon
     };
 
@@ -1227,14 +1227,16 @@ void SuccessiveShortestPaths(mgp_list *args, mgp_graph *memgraph_graph, mgp_resu
         const auto flow_in = arguments[ArgIdx::FlowIn].ValueDouble();
         const auto weight_property = std::string(arguments[ArgIdx::WeightProp].ValueString());
         const auto capacity_property = std::string(arguments[ArgIdx::CapacityProp].ValueString());
+        const auto factor_property = std::string(arguments[ArgIdx::FactorProp].ValueString());
         const auto default_weight = arguments[ArgIdx::DefaultWeight].ValueDouble();
         const auto default_capacity = arguments[ArgIdx::DefaultCapacity].ValueDouble();
+        const auto default_factor = arguments[ArgIdx::DefaultFactor].ValueDouble();
         const auto flow_conversion_str = std::string(arguments[ArgIdx::FlowConversion].ValueString());
         const auto epsilon = arguments[ArgIdx::Epsilon].ValueDouble();
 
         const std::unordered_set<std::string> convert_values_none({"", "none"});
-        const std::unordered_set<std::string> convert_values_t_over_s({"target/source", "t/s", "b/a"});
-        const std::unordered_set<std::string> convert_values_s_over_t({"source/target", "s/t", "a/b"});
+        const std::unordered_set<std::string> convert_values_t_over_s({"target/source", "t/s", "b/a", "out/in"});
+        const std::unordered_set<std::string> convert_values_s_over_t({"source/target", "s/t", "a/b", "in/out"});
 
         shortest_paths::FlowConversion flow_conversion;
         if (convert_values_none.contains(flow_conversion_str)) {
@@ -1263,6 +1265,7 @@ void SuccessiveShortestPaths(mgp_list *args, mgp_graph *memgraph_graph, mgp_resu
         const mg_graph::GraphView<>& graph_view = *graph_view_ptr;
 
         std::vector<double> capacities = GetScores(graph, graph_view, capacity_property, default_capacity, false);
+        std::vector<double> factors = GetScores(graph, graph_view, factor_property, default_factor, true); // default to weights
 
         const auto source_mgid = source_node.Id().AsUint();
         const auto target_mgid = target_node.Id().AsUint();
@@ -1279,7 +1282,8 @@ void SuccessiveShortestPaths(mgp_list *args, mgp_graph *memgraph_graph, mgp_resu
         shortest_paths::SuccessiveShortestPathsPathfinder<uint64_t> pathfinder;
         auto paths = pathfinder.search(
             graph_view, source_id, target_id, flow_in,
-            capacities, epsilon, flow_conversion,
+            capacities, factors,
+            epsilon, flow_conversion,
             abort_func
         );
 
@@ -1558,8 +1562,10 @@ extern "C" int mgp_init_module(struct mgp_module *module, struct mgp_memory *mem
                 mgp::Parameter(shortest_paths::kArgumentFlowIn, mgp::Type::Double),
                 mgp::Parameter(shortest_paths::kArgumentRelationshipWeightProperty, mgp::Type::String, ""),
                 mgp::Parameter(shortest_paths::kArgumentRelationshipCapacityProperty, mgp::Type::String, ""),
+                mgp::Parameter(shortest_paths::kArgumentRelationshipFactorProperty, mgp::Type::String, ""),
                 mgp::Parameter(shortest_paths::kArgumentDefaultWeight, mgp::Type::Double, 1.0),
                 mgp::Parameter(shortest_paths::kArgumentDefaultCapacity, mgp::Type::Double, 0.0),
+                mgp::Parameter(shortest_paths::kArgumentDefaultFactor, mgp::Type::Double, 1.0),
                 mgp::Parameter(shortest_paths::kArgumentFlowConversion, mgp::Type::String, ""),
                 mgp::Parameter(shortest_paths::kArgumentEpsilon, mgp::Type::Double, 1.0e-6),
             },

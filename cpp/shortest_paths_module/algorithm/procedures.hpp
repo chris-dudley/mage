@@ -33,6 +33,8 @@ constexpr const std::string_view kArgumentCullPerRound = "cull_per_round";
 constexpr const std::string_view kArgumentFlowIn = "flow_in";
 constexpr const std::string_view kArgumentRelationshipCapacityProperty = "relationship_capacity_property";
 constexpr const std::string_view kArgumentDefaultCapacity = "default_capacity";
+constexpr const std::string_view kArgumentRelationshipFactorProperty = "relationship_factor_property";
+constexpr const std::string_view kArgumentDefaultFactor = "default_factor";
 constexpr const std::string_view kArgumentFlowConversion = "flow_conversion";
 constexpr const std::string_view kArgumentEpsilon = "epsilon";
 
