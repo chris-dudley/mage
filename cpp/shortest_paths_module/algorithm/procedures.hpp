@@ -37,6 +37,9 @@ constexpr const std::string_view kArgumentRelationshipFactorProperty = "relation
 constexpr const std::string_view kArgumentDefaultFactor = "default_factor";
 constexpr const std::string_view kArgumentFlowConversion = "flow_conversion";
 constexpr const std::string_view kArgumentEpsilon = "epsilon";
+constexpr const std::string_view kArgumentRelationshipFixedCostProperty = "relationship_fixed_cost_property";
+constexpr const std::string_view kArgumentDefaultFixedCost = "default_fixed_cost";
+constexpr const std::string_view kArgumentWeightTransform = "weight_transform";
 
 constexpr const std::string_view kReturnIndex = "index";
 constexpr const std::string_view kReturnSourceNode = "source_node";

@@ -1,6 +1,7 @@
 #include <mgp.hpp>
 #include <mg_utils.hpp>
 
+#include <cmath>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -23,7 +24,12 @@
 
 namespace {
 
-constexpr const int64_t ALGO_DIJKSTRA = 0;
+// Types of final transform performed on weights when being adjusted
+enum WeightTransform {
+    None, // No transform on weights
+    Log10,  // log10
+    Ln,   // natural logarithm
+};
 
 // For whatever reason, calling ->GetInnerNodeId directly on the unique_ptr returned by Get(Sub)graphView breaks,
 // and will throw an mg_exception::InvalidIDException if the internal memgraph node ID is outside the range of
@@ -128,6 +134,154 @@ mgp::List ToList(TRange&& range) {
         result.Append(mgp::Value(value));
     }
     return result;
+}
+
+std::vector<double> GetEdgeNumericProp(const mgp::Graph& graph, const std::string& prop_name, const double default_score) {
+    size_t num_edges = 0;
+    for (auto _ : graph.Relationships()) {
+        num_edges++;
+    }
+    std::vector<double> scores(num_edges, default_score);
+
+    if (prop_name.empty()) {
+        return scores;
+    }
+
+    size_t edge_idx = 0;
+    for (const auto relationship : graph.Relationships()) {
+        auto prop = relationship.GetProperty(prop_name);
+        if (prop.IsNumeric()) {
+            scores[edge_idx] = prop.ValueNumeric();
+        }
+        edge_idx++;
+    }
+
+    return scores;
+}
+
+std::vector<double> GetScores(
+    const mgp::Graph& graph, const mg_graph::GraphView<>& graph_view,
+    const std::string& score_prop_name, double default_score,
+    bool use_weights_if_empty = true
+) {
+    const auto& edges = graph_view.Edges();
+    size_t num_edges = edges.size();
+    std::vector<double> scores(num_edges, default_score);
+    if (score_prop_name.empty() && (!graph_view.IsWeighted() || !use_weights_if_empty)) {
+        return scores;
+    }
+    if (score_prop_name.empty()) {
+        // Default to edge weights
+        for (uint64_t edge_id = 0; edge_id < num_edges; edge_id++) {
+            scores[edge_id] = graph_view.GetWeight(edge_id);
+        }
+        return scores;
+    }
+    for (const auto& relationship : graph.Relationships()) {
+        auto inner_id = GetInnerEdgeId(graph_view, relationship.Id().AsUint());
+        auto score_prop = relationship.GetProperty(score_prop_name);
+    
+        // To match the handling of weights in mg_graph, properties that aren't doubles or ints will receive
+        // the default score.
+        if (score_prop.IsNumeric()) {
+            scores[inner_id] = score_prop.ValueNumeric();
+        }
+    }
+
+    return scores;
+}
+
+
+// Helper function for creating a graph view (like mg_util::GetGraphView) that supports assigning
+// computed weights to edges instead of using a property.
+template<typename TSize = std::uint64_t>
+std::unique_ptr<mg_graph::Graph<TSize>>
+CreateWeightedGraphView(const mgp::Graph& graph, const std::vector<double>& weights) {
+    auto view = std::make_unique<mg_graph::Graph<TSize>>();
+    view->SetIsTransactional(graph.IsTransactional());
+
+    // Sanity check # edges vs weights
+    size_t num_edges = 0;
+    for (auto _ : graph.Relationships()) {
+        num_edges++;
+    }
+    if (num_edges > weights.size()) {
+        throw std::invalid_argument(fmt::format("not enough weights: {} edges > {} weights", num_edges, weights.size()));
+    }
+
+    for (const auto node : graph.Nodes()) {
+        view->CreateNode(node.Id().AsUint());
+    }
+
+    size_t edge_idx = 0;
+    for (const auto edge : graph.Relationships()) {
+        view->CreateEdge(
+            edge.From().Id().AsUint(), edge.To().Id().AsUint(),
+            mg_graph::GraphType::kDirectedGraph,
+            edge.Id().AsUint(), true,
+            weights[edge_idx++]
+        );
+    }
+
+    return view;
+}
+
+WeightTransform StringToWeightTransform(const std::string_view& str) {
+    if (str.empty() || str == "none") {
+        return WeightTransform::None;
+    }
+    if (str == "log10") {
+        return WeightTransform::Log10;
+    }
+    if (str == "ln" || str == "log") {
+        return WeightTransform::Ln;
+    }
+    throw mgp::ValueException(fmt::format("Invalid weight transform \"{}\"", str));
+}
+
+void AdjustWeights(std::vector<double>& weights, WeightTransform transform) {
+    switch (transform) {
+    case WeightTransform::None:
+        // nothing
+        break;
+    case WeightTransform::Log10:
+        for (size_t i = 0; i < weights.size(); i++) {
+            weights[i] = std::log10(weights[i]);
+        }
+    case WeightTransform::Ln:
+        for (size_t i = 0; i < weights.size(); i++) {
+            weights[i] = std::log(weights[i]);
+        }
+    }
+}
+
+template<typename TSize = std::uint64_t>
+std::unique_ptr<mg_graph::Graph<TSize>>
+GetGraphViewAdjusted(
+    const mgp::Graph& graph,
+    const std::string& weight_prop, const double default_weight,
+    const std::string& fixed_cost_prop, const double default_fixed_cost,
+    const double flow_amount,
+    const WeightTransform transform = WeightTransform::None
+) {
+    auto weights = GetEdgeNumericProp(graph, weight_prop, default_weight);
+    if (fixed_cost_prop.empty()) {
+        return CreateWeightedGraphView(graph, weights);
+    }
+    if (flow_amount <= 0) {
+        throw mgp::ValueException("for fixed edge cost adjustment, flow must be > 0");
+    }
+
+    auto fixed_costs = GetEdgeNumericProp(graph, fixed_cost_prop, default_fixed_cost);
+
+    // Adjust weights by scale of (1 + fixed_cost/flow_amount)
+    for (size_t idx = 0; idx < weights.size(); idx++) {
+        weights[idx] = (1.0 + (fixed_costs[idx] / flow_amount)) * weights[idx];
+    }
+
+    AdjustWeights(weights, transform);
+
+    return CreateWeightedGraphView(graph, weights);
 }
 
 void YensKShortestPaths(mgp_list *args, mgp_graph *memgraph_graph, mgp_result *result, mgp_memory *memory) {
@@ -302,38 +456,6 @@ void BellmanFordProcedure(mgp_list *args, mgp_graph *memgraph_graph, mgp_result 
         record_factory.SetErrorMessage(e.what());
         return;
     }
-}
-
-std::vector<double> GetScores(
-    const mgp::Graph& graph, const mg_graph::GraphView<>& graph_view,
-    const std::string& score_prop_name, double default_score,
-    bool use_weights_if_empty = true
-) {
-    const auto& edges = graph_view.Edges();
-    size_t num_edges = edges.size();
-    std::vector<double> scores(num_edges, default_score);
-    if (score_prop_name.empty() && (!graph_view.IsWeighted() || !use_weights_if_empty)) {
-        return scores;
-    }
-    if (score_prop_name.empty()) {
-        // Default to edge weights
-        for (uint64_t edge_id = 0; edge_id < num_edges; edge_id++) {
-            scores[edge_id] = graph_view.GetWeight(edge_id);
-        }
-        return scores;
-    }
-    for (const auto& relationship : graph.Relationships()) {
-        auto inner_id = GetInnerEdgeId(graph_view, relationship.Id().AsUint());
-        auto score_prop = relationship.GetProperty(score_prop_name);
-    
-        // To match the handling of weights in mg_graph, properties that aren't doubles or ints will receive
-        // the default score.
-        if (score_prop.IsNumeric()) {
-            scores[inner_id] = score_prop.ValueNumeric();
-        }
-    }
-
-    return scores;
 }
 
 void IterativeBellmanFordProcedure(mgp_list *args, mgp_graph *memgraph_graph, mgp_result *result, mgp_memory *memory) {
@@ -1129,11 +1251,12 @@ void Johnsons_Disjoint_K_Shortest(mgp_list *args, mgp_graph *memgraph_graph, mgp
 void DisjointKShortestPaths(mgp_list *args, mgp_graph *memgraph_graph, mgp_result *result, mgp_memory *memory) {
     // Indicies in the arguments list for parameters
     enum ArgIdx : size_t {
-        Source, Sink, K, WeightProp, ScoreProp, DefaultWeight, DefaultScore, CullPerRound, CullAscending
+        Source, Sink, K, WeightProp, ScoreProp, DefaultWeight, DefaultScore, CullPerRound, CullAscending,
+        FixedCostProp, DefaultFixedCost, FlowAmount, WeightTransform
     };
 
     mgp::MemoryDispatcherGuard mem_guard(memory);
-    mgp::Graph graph{memgraph_graph};
+    mgp::Graph graph(memgraph_graph);
 
     const auto arguments = mgp::List(args);
     const auto record_factory = mgp::RecordFactory(result);
@@ -1141,15 +1264,16 @@ void DisjointKShortestPaths(mgp_list *args, mgp_graph *memgraph_graph, mgp_resul
         const auto source_node = arguments[ArgIdx::Source].ValueNode();
         const auto sink_node = arguments[ArgIdx::Sink].ValueNode();
         const auto K = arguments[ArgIdx::K].ValueInt();
-        const auto weight_property = arguments[ArgIdx::WeightProp].ValueString();
+        const auto weight_property = std::string(arguments[ArgIdx::WeightProp].ValueString());
         const auto score_property = std::string(arguments[ArgIdx::ScoreProp].ValueString());
         const auto default_weight = arguments[ArgIdx::DefaultWeight].ValueDouble();
         const auto default_score = arguments[ArgIdx::DefaultScore].ValueDouble();
         const auto cull_per_round = arguments[ArgIdx::CullPerRound].ValueInt();
         const auto cull_ascending = arguments[ArgIdx::CullAscending].ValueBool();
-
-        bool weighted = ! weight_property.empty();
-        const char * weight_prop_cstr = weighted ? weight_property.data() : nullptr;
+        const auto fixed_cost_property = std::string(arguments[ArgIdx::FixedCostProp].ValueString());
+        const auto default_fixed_cost = arguments[ArgIdx::DefaultFixedCost].ValueDouble();
+        const auto flow_amount = arguments[ArgIdx::FlowAmount].ValueDouble();
+        const auto weight_transform_str = arguments[ArgIdx::WeightTransform].ValueString();
 
         if (K < 0) {
             throw mgp::ValueException("K cannot be negative");
@@ -1158,9 +1282,11 @@ void DisjointKShortestPaths(mgp_list *args, mgp_graph *memgraph_graph, mgp_resul
             throw mgp::ValueException("cull_per_round must be at least 1");
         }
 
-        auto graph_view_ptr = mg_utility::GetGraphView(
-            memgraph_graph, result, memory, mg_graph::GraphType::kDirectedGraph,
-            weighted, weight_prop_cstr, default_weight
+        auto graph_view_ptr = GetGraphViewAdjusted<uint64_t>(
+            graph,
+            weight_property, default_weight,
+            fixed_cost_property, default_fixed_cost,
+            flow_amount, StringToWeightTransform(weight_transform_str)
         );
 
         const mg_graph::GraphView<>& graph_view = *graph_view_ptr;
@@ -1541,7 +1667,11 @@ extern "C" int mgp_init_module(struct mgp_module *module, struct mgp_memory *mem
                 mgp::Parameter(shortest_paths::kArgumentDefaultWeight, mgp::Type::Double, 1.0),
                 mgp::Parameter(shortest_paths::kArgumentDefaultScore, mgp::Type::Double, 1.0),
                 mgp::Parameter(shortest_paths::kArgumentCullPerRound, mgp::Type::Int, 1L),
-                mgp::Parameter(shortest_paths::kArgumentCullAscending, mgp::Type::Bool, true)
+                mgp::Parameter(shortest_paths::kArgumentCullAscending, mgp::Type::Bool, true),
+                mgp::Parameter(shortest_paths::kArgumentRelationshipFixedCostProperty, mgp::Type::String, ""),
+                mgp::Parameter(shortest_paths::kArgumentDefaultFixedCost, mgp::Type::Double, 0.0),
+                mgp::Parameter(shortest_paths::kArgumentFlowIn, mgp::Type::Double, 0.0),
+                mgp::Parameter(shortest_paths::kArgumentWeightTransform, mgp::Type::String, "")
             },
             {
                 mgp::Return(shortest_paths::kReturnIndex, mgp::Type::Int),
