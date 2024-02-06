@@ -1339,7 +1339,8 @@ void SuccessiveShortestPaths(mgp_list *args, mgp_graph *memgraph_graph, mgp_resu
         Source, Target, FlowIn,
         WeightProp, CapacityProp, FactorProp,
         DefaultWeight, DefaultCapacity, DefaultFactor,
-        FlowConversion, Epsilon
+        FlowConversion, Epsilon,
+        FixedCostProp, DefaultFixedCost, FlowAmount, WeightTransform
     };
 
     mgp::MemoryDispatcherGuard mem_guard(memory);
@@ -1359,6 +1360,10 @@ void SuccessiveShortestPaths(mgp_list *args, mgp_graph *memgraph_graph, mgp_resu
         const auto default_factor = arguments[ArgIdx::DefaultFactor].ValueDouble();
         const auto flow_conversion_str = std::string(arguments[ArgIdx::FlowConversion].ValueString());
         const auto epsilon = arguments[ArgIdx::Epsilon].ValueDouble();
+        const auto fixed_cost_property = std::string(arguments[ArgIdx::FixedCostProp].ValueString());
+        const auto default_fixed_cost = arguments[ArgIdx::DefaultFixedCost].ValueDouble();
+        const auto flow_amount = arguments[ArgIdx::FlowAmount].ValueDouble();
+        const auto weight_transform_str = arguments[ArgIdx::WeightTransform].ValueString();
 
         const std::unordered_set<std::string> convert_values_none({"", "none"});
         const std::unordered_set<std::string> convert_values_t_over_s({"target/source", "t/s", "b/a", "out/in"});
@@ -1382,11 +1387,12 @@ void SuccessiveShortestPaths(mgp_list *args, mgp_graph *memgraph_graph, mgp_resu
         }
 
         bool weighted = ! weight_property.empty();
-        const char * weight_prop_cstr = weighted ? weight_property.c_str() : nullptr;
 
-        auto graph_view_ptr = mg_utility::GetGraphView(
-            memgraph_graph, result, memory, mg_graph::GraphType::kDirectedGraph,
-            weighted, weight_prop_cstr, default_weight
+        auto graph_view_ptr = GetGraphViewAdjusted<uint64_t>(
+            graph,
+            weight_property, default_weight,
+            fixed_cost_property, default_fixed_cost,
+            flow_amount, StringToWeightTransform(weight_transform_str)
         );
         const mg_graph::GraphView<>& graph_view = *graph_view_ptr;
 
@@ -1698,6 +1704,10 @@ extern "C" int mgp_init_module(struct mgp_module *module, struct mgp_memory *mem
                 mgp::Parameter(shortest_paths::kArgumentDefaultFactor, mgp::Type::Double, 1.0),
                 mgp::Parameter(shortest_paths::kArgumentFlowConversion, mgp::Type::String, ""),
                 mgp::Parameter(shortest_paths::kArgumentEpsilon, mgp::Type::Double, 1.0e-6),
+                mgp::Parameter(shortest_paths::kArgumentRelationshipFixedCostProperty, mgp::Type::String, ""),
+                mgp::Parameter(shortest_paths::kArgumentDefaultFixedCost, mgp::Type::Double, 0.0),
+                mgp::Parameter(shortest_paths::kArgumentFlowIn, mgp::Type::Double, 0.0),
+                mgp::Parameter(shortest_paths::kArgumentWeightTransform, mgp::Type::String, "")
             },
             {
                 mgp::Return(shortest_paths::kReturnIndex, mgp::Type::Int),
