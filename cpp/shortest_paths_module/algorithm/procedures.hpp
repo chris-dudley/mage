@@ -40,6 +40,7 @@ constexpr const std::string_view kArgumentEpsilon = "epsilon";
 constexpr const std::string_view kArgumentRelationshipFixedCostProperty = "relationship_fixed_cost_property";
 constexpr const std::string_view kArgumentDefaultFixedCost = "default_fixed_cost";
 constexpr const std::string_view kArgumentWeightTransform = "weight_transform";
+constexpr const std::string_view kArgumentOptions = "options";
 
 constexpr const std::string_view kReturnIndex = "index";
 constexpr const std::string_view kReturnSourceNode = "source_node";

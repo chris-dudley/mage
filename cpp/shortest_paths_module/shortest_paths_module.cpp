@@ -20,7 +20,11 @@
 #include "algorithm/disjoint.hpp"
 #include "algorithm/successive_shortest_paths.hpp"
 
+#include "util/options.hpp"
+
 #define RECORD_NAME(x) (std::string((x)).c_str())
+
+namespace sp = shortest_paths;
 
 namespace {
 
@@ -1337,10 +1341,7 @@ void SuccessiveShortestPaths(mgp_list *args, mgp_graph *memgraph_graph, mgp_resu
     // Indicies in the arguments list for parameters
     enum ArgIdx : size_t {
         Source, Target, FlowIn,
-        WeightProp, CapacityProp, FactorProp,
-        DefaultWeight, DefaultCapacity, DefaultFactor,
-        FlowConversion, Epsilon,
-        FixedCostProp, DefaultFixedCost, FlowAmount, WeightTransform
+        Options
     };
 
     mgp::MemoryDispatcherGuard mem_guard(memory);
@@ -1352,18 +1353,19 @@ void SuccessiveShortestPaths(mgp_list *args, mgp_graph *memgraph_graph, mgp_resu
         const auto source_node = arguments[ArgIdx::Source].ValueNode();
         const auto target_node = arguments[ArgIdx::Target].ValueNode();
         const auto flow_in = arguments[ArgIdx::FlowIn].ValueDouble();
-        const auto weight_property = std::string(arguments[ArgIdx::WeightProp].ValueString());
-        const auto capacity_property = std::string(arguments[ArgIdx::CapacityProp].ValueString());
-        const auto factor_property = std::string(arguments[ArgIdx::FactorProp].ValueString());
-        const auto default_weight = arguments[ArgIdx::DefaultWeight].ValueDouble();
-        const auto default_capacity = arguments[ArgIdx::DefaultCapacity].ValueDouble();
-        const auto default_factor = arguments[ArgIdx::DefaultFactor].ValueDouble();
-        const auto flow_conversion_str = std::string(arguments[ArgIdx::FlowConversion].ValueString());
-        const auto epsilon = arguments[ArgIdx::Epsilon].ValueDouble();
-        const auto fixed_cost_property = std::string(arguments[ArgIdx::FixedCostProp].ValueString());
-        const auto default_fixed_cost = arguments[ArgIdx::DefaultFixedCost].ValueDouble();
-        const auto flow_amount = arguments[ArgIdx::FlowAmount].ValueDouble();
-        const auto weight_transform_str = arguments[ArgIdx::WeightTransform].ValueString();
+        const sp::util::Options options(arguments[ArgIdx::Options].ValueMap());
+
+        const auto weight_property = options.String(sp::kArgumentRelationshipWeightProperty).value_or("");
+        const auto capacity_property = options.String(sp::kArgumentRelationshipCapacityProperty).value_or("");
+        const auto factor_property = options.String(sp::kArgumentRelationshipFactorProperty).value_or("");
+        const auto default_weight = options.Numeric(sp::kArgumentDefaultWeight).value_or(1.0);
+        const auto default_capacity = options.Numeric(sp::kArgumentDefaultCapacity).value_or(0.0);
+        const auto default_factor = options.Numeric(sp::kArgumentDefaultFactor).value_or(1.0);
+        const auto flow_conversion_str = options.String(sp::kArgumentFlowConversion).value_or("");
+        const auto epsilon = options.Numeric(sp::kArgumentEpsilon).value_or(1.0e-6);
+        const auto fixed_cost_property = options.String(sp::kArgumentRelationshipFixedCostProperty).value_or("");
+        const auto default_fixed_cost = options.Numeric(sp::kArgumentDefaultFixedCost).value_or(0.0);
+        const auto weight_transform_str = options.String(sp::kArgumentWeightTransform).value_or("");
 
         const std::unordered_set<std::string> convert_values_none({"", "none"});
         const std::unordered_set<std::string> convert_values_t_over_s({"target/source", "t/s", "b/a", "out/in"});
@@ -1386,13 +1388,11 @@ void SuccessiveShortestPaths(mgp_list *args, mgp_graph *memgraph_graph, mgp_resu
             return;
         }
 
-        bool weighted = ! weight_property.empty();
-
         auto graph_view_ptr = GetGraphViewAdjusted<uint64_t>(
             graph,
             weight_property, default_weight,
             fixed_cost_property, default_fixed_cost,
-            flow_amount, StringToWeightTransform(weight_transform_str)
+            flow_in, StringToWeightTransform(weight_transform_str)
         );
         const mg_graph::GraphView<>& graph_view = *graph_view_ptr;
 
@@ -1449,6 +1449,7 @@ extern "C" int mgp_init_module(struct mgp_module *module, struct mgp_memory *mem
 
         auto return_costs_type = std::make_pair(mgp::Type::List, mgp::Type::Double);
         mgp::Value empty_list(mgp::List{});
+        mgp::Value empty_map(mgp::Map{});
 
         mgp::AddProcedure(
             YensKShortestPaths, shortest_paths::kProcedureYens, mgp::ProcedureType::Read,
@@ -1696,7 +1697,8 @@ extern "C" int mgp_init_module(struct mgp_module *module, struct mgp_memory *mem
                 mgp::Parameter(shortest_paths::kArgumentSourceNode, mgp::Type::Node),
                 mgp::Parameter(shortest_paths::kArgumentTargetNode, mgp::Type::Node),
                 mgp::Parameter(shortest_paths::kArgumentFlowIn, mgp::Type::Double),
-                mgp::Parameter(shortest_paths::kArgumentRelationshipWeightProperty, mgp::Type::String, ""),
+                mgp::Parameter(shortest_paths::kArgumentOptions, mgp::Type::Map, empty_map)
+/*                 mgp::Parameter(shortest_paths::kArgumentRelationshipWeightProperty, mgp::Type::String, ""),
                 mgp::Parameter(shortest_paths::kArgumentRelationshipCapacityProperty, mgp::Type::String, ""),
                 mgp::Parameter(shortest_paths::kArgumentRelationshipFactorProperty, mgp::Type::String, ""),
                 mgp::Parameter(shortest_paths::kArgumentDefaultWeight, mgp::Type::Double, 1.0),
@@ -1707,7 +1709,7 @@ extern "C" int mgp_init_module(struct mgp_module *module, struct mgp_memory *mem
                 mgp::Parameter(shortest_paths::kArgumentRelationshipFixedCostProperty, mgp::Type::String, ""),
                 mgp::Parameter(shortest_paths::kArgumentDefaultFixedCost, mgp::Type::Double, 0.0),
                 mgp::Parameter(shortest_paths::kArgumentFlowIn, mgp::Type::Double, 0.0),
-                mgp::Parameter(shortest_paths::kArgumentWeightTransform, mgp::Type::String, "")
+                mgp::Parameter(shortest_paths::kArgumentWeightTransform, mgp::Type::String, "") */
             },
             {
                 mgp::Return(shortest_paths::kReturnIndex, mgp::Type::Int),
