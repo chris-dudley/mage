@@ -19,6 +19,7 @@
 #include "algorithm/johnsons.hpp"
 #include "algorithm/disjoint.hpp"
 #include "algorithm/successive_shortest_paths.hpp"
+#include "algorithm/optimize.hpp"
 
 #include "util/options.hpp"
 
@@ -1691,25 +1692,28 @@ extern "C" int mgp_init_module(struct mgp_module *module, struct mgp_memory *mem
             module, memory
         );
 
+        mgp::Map ssp_defaults {
+            {shortest_paths::kArgumentRelationshipWeightProperty, mgp::Value("")},
+            {shortest_paths::kArgumentRelationshipCapacityProperty, mgp::Value("")},
+            {shortest_paths::kArgumentRelationshipFactorProperty, mgp::Value("")},
+            {shortest_paths::kArgumentDefaultWeight, mgp::Value(1.0)},
+            {shortest_paths::kArgumentDefaultCapacity, mgp::Value(0.0)},
+            {shortest_paths::kArgumentDefaultFactor, mgp::Value(1.0)},
+            {shortest_paths::kArgumentFlowConversion, mgp::Value("")},
+            {shortest_paths::kArgumentEpsilon, mgp::Value(1.0e-6)},
+            {shortest_paths::kArgumentRelationshipFixedCostProperty, mgp::Value("")},
+            {shortest_paths::kArgumentDefaultFixedCost, mgp::Value(0.0)},
+            {shortest_paths::kArgumentFlowIn, mgp::Value(0.0)},
+            {shortest_paths::kArgumentWeightTransform, mgp::Value("")}
+        };
+
         mgp::AddProcedure(
             SuccessiveShortestPaths, shortest_paths::kProcedureSuccessiveShortestPaths, mgp::ProcedureType::Read,
             {
                 mgp::Parameter(shortest_paths::kArgumentSourceNode, mgp::Type::Node),
                 mgp::Parameter(shortest_paths::kArgumentTargetNode, mgp::Type::Node),
                 mgp::Parameter(shortest_paths::kArgumentFlowIn, mgp::Type::Double),
-                mgp::Parameter(shortest_paths::kArgumentOptions, mgp::Type::Map, empty_map)
-/*                 mgp::Parameter(shortest_paths::kArgumentRelationshipWeightProperty, mgp::Type::String, ""),
-                mgp::Parameter(shortest_paths::kArgumentRelationshipCapacityProperty, mgp::Type::String, ""),
-                mgp::Parameter(shortest_paths::kArgumentRelationshipFactorProperty, mgp::Type::String, ""),
-                mgp::Parameter(shortest_paths::kArgumentDefaultWeight, mgp::Type::Double, 1.0),
-                mgp::Parameter(shortest_paths::kArgumentDefaultCapacity, mgp::Type::Double, 0.0),
-                mgp::Parameter(shortest_paths::kArgumentDefaultFactor, mgp::Type::Double, 1.0),
-                mgp::Parameter(shortest_paths::kArgumentFlowConversion, mgp::Type::String, ""),
-                mgp::Parameter(shortest_paths::kArgumentEpsilon, mgp::Type::Double, 1.0e-6),
-                mgp::Parameter(shortest_paths::kArgumentRelationshipFixedCostProperty, mgp::Type::String, ""),
-                mgp::Parameter(shortest_paths::kArgumentDefaultFixedCost, mgp::Type::Double, 0.0),
-                mgp::Parameter(shortest_paths::kArgumentFlowIn, mgp::Type::Double, 0.0),
-                mgp::Parameter(shortest_paths::kArgumentWeightTransform, mgp::Type::String, "") */
+                mgp::Parameter(shortest_paths::kArgumentOptions, mgp::Type::Map, mgp::Value(ssp_defaults))
             },
             {
                 mgp::Return(shortest_paths::kReturnIndex, mgp::Type::Int),

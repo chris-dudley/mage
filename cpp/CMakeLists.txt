@@ -120,6 +120,15 @@ FetchContent_Declare(fmt
 )
 FetchContent_MakeAvailable(fmt)
 
+# Add HiGHS - linear programming optimization library
+FetchContent_Declare(
+  highs
+  GIT_REPOSITORY "https://github.com/ERGO-Code/HiGHS.git"
+  GIT_TAG        "bazel"
+)
+set(FAST_BUILD ON CACHE INTERNAL "Fast Build")
+FetchContent_MakeAvailable(highs)
+
 function(add_query_module target_name version src)
   add_library(${target_name} SHARED ${src})
   set_target_properties(${target_name} PROPERTIES SOVERSION "${version}")

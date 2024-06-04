@@ -17,6 +17,8 @@
 #include "algorithm/johnsons.hpp"
 #include "algorithm/disjoint.hpp"
 #include "algorithm/successive_shortest_paths.hpp"
+#include "algorithm/polyedge.hpp"
+#include "algorithm/optimize.hpp"
 
 void check_abort_noop() {}
 
@@ -1432,6 +1434,99 @@ TEST(ShortestPaths, SSP_SmallGraphConv_SourceOverTarget) {
         ASSERT_EQ(paths[i].first.edges, expected_flow_2_paths[i].first);
         ASSERT_EQ(paths[i].second, expected_flow_2_paths[i].second);
     }
+}
+
+TEST(ShortestPaths, PolyEdge_Construct) {
+    using shortest_paths::PolyEdge;
+
+    PolyEdge default_edge;
+    ASSERT_EQ(default_edge.id(), std::numeric_limits<uint64_t>::max());
+    ASSERT_EQ(default_edge.coefficients().size(), 1);
+    ASSERT_EQ(default_edge.coefficients()[0], 1);
+
+    PolyEdge edge_1(1UL);
+    ASSERT_EQ(edge_1.id(), 1UL);
+    ASSERT_EQ(edge_1.coefficients().size(), 1);
+    ASSERT_EQ(edge_1.coefficients()[0], 1);
+
+    // y = x + 1
+    Eigen::VectorXd x{{0.0, 1.0}};
+    Eigen::VectorXd y{{1.0, 2.0}};
+    PolyEdge edge_linear(2UL, x, y);
+    ASSERT_EQ(edge_linear.id(), 2UL);
+    ASSERT_EQ(edge_linear.coefficients().size(), 2);
+    // coefficients should be (1.0, 1.0)
+    ASSERT_DOUBLE_EQ(edge_linear.coefficients()(0), 1.0);
+    ASSERT_DOUBLE_EQ(edge_linear.coefficients()(1), 1.0);
+
+    std::vector<double> x_vec{0.0, 1.0};
+    std::vector<double> y_vec{1.0, 2.0};
+    PolyEdge edge_linear_std(3UL, x_vec, y_vec);
+    ASSERT_EQ(edge_linear_std.id(), 3UL);
+    ASSERT_EQ(edge_linear_std.coefficients().size(), 2);
+    // coefficients should be (1.0, 1.0)
+    ASSERT_DOUBLE_EQ(edge_linear_std.coefficients()(0), 1.0);
+    ASSERT_DOUBLE_EQ(edge_linear_std.coefficients()(1), 1.0);
+}
+
+TEST(ShortestPaths, EdgeNetwork_Construct) {
+    using PolyEdge = shortest_paths::PolyEdge<uint64_t>;
+    using EdgeNetwork = shortest_paths::EdgeNetwork<uint64_t>;
+    
+    constexpr const uint64_t N_PATHS = 2UL;
+    constexpr const uint64_t PATH_LEN = 2UL;
+
+    std::vector<std::vector<PolyEdge>> poly_edge_list;
+    for (uint64_t i = 0; i < N_PATHS; i++) {
+        std::vector<PolyEdge> row;
+        
+        for (uint64_t j = 0; j < PATH_LEN; j++) {
+            row.emplace_back((i * N_PATHS) + j);
+        }
+
+        poly_edge_list.push_back(row);
+    }
+
+    EdgeNetwork test_network(poly_edge_list);
+    ASSERT_EQ(test_network.paths().size(), N_PATHS);
+    for (uint64_t i = 0; i < N_PATHS; i++) {
+        ASSERT_EQ(test_network.paths()[i].size(), PATH_LEN);
+    }
+}
+
+/* Edges marked as weight:capacity
+ *
+ *       ┌───2:30────┐
+ *       │           │
+ *       │           │
+ * ┌───┐ │           │  ┌───┐               ┌───┐
+ * │ 0 ├─┼───1:20────┼─►│ 1 ├─────1:110────►│ 2 │
+ * └───┘ │           │  └───┘               └───┘
+ *       │           │
+ *       │           │
+ *       └───3:60────┘
+ */
+TEST(ShortestPaths, OptimizeFlow_Simple) {
+    auto G = mg_generate::BuildWeightedGraph(
+        3,
+        {
+            /*0*/ {{0, 1}, 2.0},
+            /*1*/ {{0, 1}, 1.0},
+            /*2*/ {{0, 1}, 3.0},
+            /*3*/ {{1, 2}, 1.0},
+        },
+        mg_graph::GraphType::kDirectedGraph
+    );
+    const std::vector<double> capacities = {30.0, 20.0, 60.0, 110.0};
+
+    std::vector<shortest_paths::Path<uint64_t>> paths {
+        {{0, 1, 2}, {0, 3}, {2, 1}, {3}},
+        {{0, 1, 2}, {1, 3}, {1, 1}, {2}},
+    };
+
+    auto result = shortest_paths::OptimizeFlows<>(*G, paths);
+
+    ASSERT_TRUE(result.success);
 }
 
 int main(int argc, char **argv) {
