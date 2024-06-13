@@ -214,7 +214,7 @@ inline double FrankWolfe<TSize>::determine_step(Eigen::VectorXd &candidate) {
   double gamma = 1;
   for (uint i = 0; i < 10; i++) {
     double temp = this->target_func(this->solution + gamma * direction);
-    if (temp < this->fx) break;
+    if (temp > this->fx) break;
     gamma /= 2.0;
   }
 
