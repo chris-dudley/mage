@@ -6,7 +6,6 @@
 
 #include <limits>
 #include <utility>
-#include <exception>
 #include <ranges>
 #include <unordered_map>
 
@@ -74,7 +73,7 @@ public:
         coefficients_ = other.coefficients_;
         return *this;
     }
-    SelfType& operator=(SelfType &&other) {
+    SelfType& operator=(SelfType &&other) noexcept {
         id_ = other.id_;
         coefficients_ = std::move(other.coefficients_);
         return *this;
@@ -119,9 +118,9 @@ public:
         }
 
         Eigen::NNLS<Eigen::MatrixXd> nnls_solver(matrix);
-        this->coefficients_ = nnls_solver.solve(y);
+        coefficients_ = nnls_solver.solve(y);
 
-        for (auto i = 0; i < this->coefficients_.size(); i++) {
+        for (auto i = 0; i < coefficients_.size(); i++) {
             if (coefficients_[i] < 0.0) {
                 throw std::logic_error(fmt::format("Non-negative LLS solver somehow returned negative coefficient[{}]={}", i, coefficients_[i]));
             }
@@ -150,7 +149,10 @@ public:
         return 1.0 / evaluate(x);
     }
 
-    double evaluate_int(double x) const {
+    /// @brief Evaluate the integral of the polynomial at the given x value.
+    /// @param x The x value at which to evaluate the integral of the polynomial.
+    /// @return The y value of the integral of the polynomial.
+    double evaluate_integral(double x) const {
         double retval = 0;
         for (auto i = 0; i < coefficients_.size(); i++) {
             if (i != 0) {
@@ -162,14 +164,14 @@ public:
         return retval;
     }
 
-    double evaluate_avg_price(double x, double prev_swapped = 0.0) {
+    double evaluate_avg_price(double x, double prev_swapped = 0.0) const {
         // Average weight (price) is the integral of our polynomial divided by the
         // amount swapped to get there.
-        double integral = evaluate_int(x + prev_swapped) - evaluate_int(prev_swapped);
+        double integral = evaluate_integral(x + prev_swapped) - evaluate_integral(prev_swapped);
         return integral / x;
     }
 
-    double evaluate_swap(double x, double prev_swapped = 0.0) {
+    double evaluate_swap(double x, double prev_swapped = 0.0) const {
         // A swap (Out / In) * In execuated at the "average" price paid.
         return x / evaluate_avg_price(x);
     }
@@ -194,7 +196,13 @@ public:
     EdgeNetwork(const std::vector<std::vector<EdgeType>> &paths): paths_(paths) { }
     EdgeNetwork(std::vector<std::vector<EdgeType>> &&paths): paths_(std::move(paths)) { }
 
-    double evaluate_allocations(const Vector &allocation) {
+    EdgeNetwork(const SelfType&) = default;
+    EdgeNetwork(SelfType&&) noexcept = default;
+
+    SelfType& operator=(const SelfType&) = default;
+    SelfType& operator=(SelfType&&) = default;
+
+    double evaluate_allocations(const Vector &allocation) const {
         Vector path_outputs = allocation;
         Vector temp(allocation.size());
 
@@ -213,7 +221,7 @@ public:
         return path_outputs.sum();
     }
 
-    Vector evaluate_gradient(const Vector &allocation, const double eps = 1.0e-6) {
+    Vector evaluate_gradient(const Vector &allocation, const double eps = 1.0e-6) const {
         Vector gradient(allocation.size());
         Vector shift_up = allocation;
         Vector shift_down = allocation;
@@ -235,6 +243,10 @@ public:
 
     const std::vector<std::vector<EdgeType>>& paths() const {
         return paths_;
+    }
+
+    const size_t num_paths() const noexcept {
+        return paths_.size();
     }
 private:
     std::vector<std::vector<EdgeType>> paths_;

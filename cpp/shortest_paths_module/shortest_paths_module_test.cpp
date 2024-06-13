@@ -307,6 +307,74 @@ TEST(ShortestPaths, DijkstraHugeCyclicGraph) {
     ASSERT_DOUBLE_EQ(path.total_cost, (SHORTEST_PATH_EDGES) * 1.0);
 }
 
+/*
+ *                ┌───┐                          ┌───┐
+ *   ┌──50───────►│ 2 ├─────────┬────────80─────►│ 4 │
+ *   │            └───┘         │                └▲─┬┘
+ *   │                         40                 │ │
+ *   │                          │                 │ 40
+ * ┌─┴─┐                       ┌▼──┐              │ │
+ * │ 0 ├────────100───────────►│ 3 ├──┬──30───────┘ │
+ * └─┬─┘                       └▲──┘  │             │
+ *   │                          │     │          ┌──▼┐
+ *   │                         40     └──80─────►│ 5 │
+ *   │                          │                └───┘
+ *   │            ┌───┐         │
+ *   └──50───────►│ 1 ├─────────┘
+ *                └───┘
+ */
+TEST(ShortestPaths, DijkstraConstrained) {
+    auto G = mg_generate::BuildWeightedGraph(
+        6,
+        {
+            /*0*/ {{0, 1}, 50.0}, /*1*/ {{0, 2}, 50.0}, /*2*/ {{0, 3}, 100.0},
+            /*3*/ {{1, 3}, 40.0},
+            /*4*/ {{2, 3}, 40.0}, /*5*/ {{2, 4}, 80.0},
+            /*6*/ {{3, 4}, 30.0}, /*7*/ {{3, 5}, 80.0},
+            /*8*/ {{4, 5}, 40.0}
+        },
+        mg_graph::GraphType::kDirectedGraph
+    );
+    std::vector<double> weights;
+    for (const auto& edge : G->Edges()) {
+        weights.push_back(G->GetWeight(edge.id));
+    }
+    // Assign volume of 1 to each edge, so path volume = path length
+    std::vector<double> volumes(weights.size(), 1.0);
+
+    // Should be the same as before with no maximum volume
+    shortest_paths::Path<> expected_path_nomax{
+        {0, 1, 3, 4, 5}, // nodes
+        {0, 3, 6, 8},    // edges
+        {0.0, 50.0, 90.0, 120.0, 160.0}, // costs
+        160.0 // total weight
+    };
+
+    shortest_paths::DijkstraPathfinder<uint64_t> pathfinder;
+
+    pathfinder.search_constrained(*G, 0, 5, weights, volumes, -INFINITY, INFINITY, {}, {}, check_abort_noop);
+    auto path = pathfinder.path_to(5);
+    ASSERT_EQ(path.nodes, expected_path_nomax.nodes);
+    ASSERT_EQ(path.edges, expected_path_nomax.edges);
+    ASSERT_EQ(path.costs, expected_path_nomax.costs);
+    ASSERT_EQ(path.total_cost, expected_path_nomax.total_cost);
+
+    // If max length is 3, should ignore paths through node 4
+    shortest_paths::Path<> expected_path_max_3{
+        {0, 1, 3, 5}, // nodes
+        {0, 3, 7},    // edges
+        {0.0, 50.0, 90.0, 170.0}, // costs
+        170.0 // total weight
+    };
+
+    pathfinder.search_constrained(*G, 0, 5, weights, volumes, -INFINITY, 3.0, {}, {}, check_abort_noop);
+    path = pathfinder.path_to(5);
+    ASSERT_EQ(path.nodes, expected_path_max_3.nodes);
+    ASSERT_EQ(path.edges, expected_path_max_3.edges);
+    ASSERT_EQ(path.costs, expected_path_max_3.costs);
+    ASSERT_EQ(path.total_cost, expected_path_max_3.total_cost);
+}
+
 TEST(ShortestPaths, YensEmptyGraph) {
     auto G = mg_generate::BuildGraph(0, {});
 
@@ -1494,17 +1562,33 @@ TEST(ShortestPaths, EdgeNetwork_Construct) {
     }
 }
 
-/* Edges marked as weight:capacity
+TEST(ShortestPaths, FrankWolfe_Simple) {
+    Eigen::VectorXd initial_guess{{0.5, 0.5}};
+    shortest_paths::OptimizationOptions options{1.0e-6, 1.0e-6, 1.0e-4, 50};
+    auto target_func = [](const Eigen::VectorXd& x) { return x.squaredNorm(); };
+    shortest_paths::FrankWolfe<uint64_t> optimizer(2, target_func, initial_guess, options);
+    ASSERT_TRUE(optimizer.run());
+    ASSERT_TRUE(optimizer.is_valid());
+    
+    const auto& solution = optimizer.result();
+    std::cerr << "Solution: [" << solution[0] << ", " << solution[1] << "]" << std::endl;
+    ASSERT_EQ(solution.size(), 2);
+    // Should be either [0, 1] or [1, 0]
+    ASSERT_TRUE((abs(solution[0] - 1.0) < 1.0e-6) xor (abs(solution[1] - 1.0) < 1.0e-6));
+    ASSERT_FLOAT_EQ(optimizer.expected_output(), 1.0);
+}
+
+/* Edges marked with weights.
  *
- *       ┌───2:30────┐
+ *       ┌──── 2 ────┐
  *       │           │
  *       │           │
  * ┌───┐ │           │  ┌───┐               ┌───┐
- * │ 0 ├─┼───1:20────┼─►│ 1 ├─────1:110────►│ 2 │
+ * │ 0 ├─┼──── 1 ────┼─►│ 1 ├─────1────────►│ 2 │
  * └───┘ │           │  └───┘               └───┘
  *       │           │
  *       │           │
- *       └───3:60────┘
+ *       └──── 3 ────┘
  */
 TEST(ShortestPaths, OptimizeFlow_Simple) {
     auto G = mg_generate::BuildWeightedGraph(
@@ -1517,14 +1601,25 @@ TEST(ShortestPaths, OptimizeFlow_Simple) {
         },
         mg_graph::GraphType::kDirectedGraph
     );
-    const std::vector<double> capacities = {30.0, 20.0, 60.0, 110.0};
-
     std::vector<shortest_paths::Path<uint64_t>> paths {
         {{0, 1, 2}, {0, 3}, {2, 1}, {3}},
         {{0, 1, 2}, {1, 3}, {1, 1}, {2}},
     };
+    std::vector<std::vector<double>> x_coords{
+        {0.0, 1.0, 2.0},
+        {0.0, 1.0, 2.0},
+        {0.0, 1.0, 2.0},
+        {0.0, 1.0, 2.0},
+    };
+    std::vector<std::vector<double>> y_coords{
+        {2.0, 2.0, 2.0},
+        {1.0, 1.0, 1.0},
+        {3.0, 3.0, 3.0},
+        {1.0, 1.0, 1.0},
+    };
+    const double input_flow = 60.0;
 
-    auto result = shortest_paths::OptimizeFlows<>(*G, paths);
+    auto result = shortest_paths::OptimizeFlows<>(*G, paths, x_coords, y_coords, input_flow);
 
     ASSERT_TRUE(result.success);
 }

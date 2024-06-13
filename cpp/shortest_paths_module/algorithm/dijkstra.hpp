@@ -47,6 +47,7 @@ private:
     struct HeapData {
         TSize node_id;
         double distance;
+        double volume;
 
         std::partial_ordering operator<=>(const HeapData& rhs) const {
             return distance <=> rhs.distance;
@@ -74,9 +75,10 @@ private:
 public:
     DijkstraPathfinder() = default;
     DijkstraPathfinder(const Self&) = default;
-    DijkstraPathfinder(Self&&) = default;
+    DijkstraPathfinder(Self&&) noexcept = default;
     Self& operator=(const Self&) = default;
-    Self& operator=(Self&&) = default;
+    Self& operator=(Self&&) noexcept = default;
+    ~DijkstraPathfinder() = default;
 
     /// @brief Resets the state of the pathfinder and then searches for the shorest paths on `graph` from `source`
     ///     to all other reachable nodes.
@@ -114,6 +116,7 @@ public:
         if (source >= num_nodes) {
             throw std::invalid_argument("source node not in graph");
         }
+
         do_search(graph, ignored_edges, ignored_nodes, check_abort);
     }
 
@@ -127,7 +130,7 @@ public:
     void search(const GraphViewType& graph, TSize source, TSize target, const CheckAbortFunc &check_abort = CheckAbortNoop) {
         EdgeIdSet empty_edges;
         NodeIdSet empty_nodes;
-        search(graph, source, target, empty_edges, empty_nodes);
+        search(graph, source, target, empty_edges, empty_nodes, check_abort);
     }
 
     /// @brief Resets the state of the pathfinder and then searches for the shorest paths on `graph` from `source`
@@ -179,7 +182,7 @@ public:
     ) {
         EdgeIdSet empty_edges;
         NodeIdSet empty_nodes;
-        search_with_weights(graph, source, target, weights, empty_edges, empty_nodes);
+        search_with_weights(graph, source, target, weights, empty_edges, empty_nodes, check_abort);
     }
 
     /// @brief Resets the state of the pathfinder and then searches for the shorest paths on `graph` from `source`
@@ -223,13 +226,81 @@ public:
         do_search(graph, weights, ignored_edges, ignored_nodes, check_abort);
     }
 
+    /// @brief Resets the state of the pathfinder and then searches for the shorest paths on `graph` from `source`
+    ///     to `target`, if such a path exists. Paths are constrained to have a minimum/maximum "volume", which is
+    ///     additive among edges along the path.
+    /// @param graph The graph to search.
+    /// @param source The ID of the source node.
+    /// @param target The ID of the target node.
+    /// @param weights The weights of each edge, indexed by ID.
+    /// @param volumes The volumes of each edge, indexed by ID.
+    /// @param min_volume The minimum volume allowed for a valid path.
+    /// @param max_volume The maximum volume allowed for a valid path.
+    /// @param ignored_edges Set of edge IDs to ignore during pathfinding.
+    /// @param ignored_nodes Set of node IDs to ignore during pathfinding.
+    /// @param check_abort Function that should throw an exception if execution should be aborted.
+    /// @throws std::invalid_argument if the source or target nodes are not in the graph.
+    void search_constrained(
+        const GraphViewType& graph, TSize source, TSize target,
+        const WeightVec& weights, const WeightVec& volumes,
+        const double min_volume, const double max_volume,
+        const EdgeIdSet& ignored_edges, const NodeIdSet& ignored_nodes,
+        const CheckAbortFunc &check_abort = CheckAbortNoop
+    ) {
+        const TSize num_nodes = graph.Nodes().size();
+        const TSize num_edges = graph.Edges().size();
+        reset(num_nodes, source, target);
+
+        if (num_nodes == 0) {
+            // Empty graph, no paths to find
+            return;
+        }
+
+        if (source >= num_nodes) {
+            throw std::invalid_argument("source node not in graph");
+        }
+        if (target >= num_nodes) {
+            throw std::invalid_argument("target not node in graph");
+        }
+        if (weights.size() < num_edges) {
+            throw std::invalid_argument(fmt::format(
+                "not enough edge weights given: {} weights < {} edges",
+                weights.size(), num_edges
+            ));
+        }
+        do_search_constrained(graph, weights, volumes, min_volume, max_volume, ignored_edges, ignored_nodes, check_abort);
+    }
+
+    /// @brief Resets the state of the pathfinder and then searches for the shorest paths on `graph` from `source`
+    ///     to `target`, if such a path exists. Paths are constrained to have a minimum/maximum "volume", which is
+    ///     additive among edges along the path.
+    /// @param graph The graph to search.
+    /// @param source The ID of the source node.
+    /// @param target The ID of the target node.
+    /// @param weights The weights of each edge, indexed by ID.
+    /// @param volumes The volumes of each edge, indexed by ID.
+    /// @param min_volume The minimum volume allowed for a valid path.
+    /// @param max_volume The maximum volume allowed for a valid path.
+    /// @param check_abort Function that should throw an exception if execution should be aborted.
+    /// @throws std::invalid_argument if the source or target nodes are not in the graph.
+    void search_constrained(
+        const GraphViewType& graph, TSize source, TSize target,
+        const WeightVec& weights, const WeightVec& volumes,
+        const double min_volume, const double max_volume,
+        const CheckAbortFunc &check_abort = CheckAbortNoop
+    ) {
+        NodeIdSet ignored_nodes;
+        EdgeIdSet ignored_edges;
+        search_constrained(graph, source, target, weights, volumes, min_volume, max_volume, ignored_edges, ignored_nodes, check_abort);
+    }
+
     /// @brief Returns the number of reachable nodes in the graph, including the source.
     size_t num_reachable_nodes() const {
         size_t result = 0;
-        for (size_t node_id = 0; node_id < dist_to.size(); node_id++) {
-            if (dist_to[node_id] < POSITIVE_INFINITY) {
-                result++;
-            }
+        for (auto node_dist : dist_to) {
+          if (node_dist < POSITIVE_INFINITY) {
+            result++;
+          }
         }
         return result;
     }
@@ -315,7 +386,7 @@ private:
 
         HeapType node_queue;
         // Seed queue with source node
-        node_queue.emplace(source_id, 0.0);
+        node_queue.emplace(source_id, 0.0, 0.0);
 
         while (!node_queue.empty()) {
             check_abort();
@@ -347,7 +418,7 @@ private:
 
         HeapType node_queue;
         // Seed queue with source node
-        node_queue.emplace(source_id, 0.0);
+        node_queue.emplace(source_id, 0.0, 0.0);
 
         while (!node_queue.empty()) {
             check_abort();
@@ -366,6 +437,44 @@ private:
             }
 
             relax(graph, current_node, node_queue, weights, ignored_edges, ignored_nodes);
+        }
+    }
+
+    // Perform search with volume constraints
+    void do_search_constrained(
+        const GraphViewType& graph, const WeightVec& weights, const WeightVec& volumes,
+        const double min_volume, const double max_volume,
+        const EdgeIdSet& ignored_edges, const NodeIdSet& ignored_nodes,
+        const CheckAbortFunc &check_abort
+    ) {
+        dist_to[source_id] = 0.0;
+
+        HeapType node_queue;
+        // Seed queue with source node
+        node_queue.emplace(source_id, 0.0, 0.0);
+
+        while (!node_queue.empty()) {
+            check_abort();
+
+            auto current_node = node_queue.top().node_id;
+            auto current_volume = node_queue.top().volume;
+            node_queue.pop();
+            if (added[current_node]) {
+                // Don't revisit nodes
+                continue;
+            }
+            added[current_node] = true;
+
+            if (target_id.has_value() && target_id.value() == current_node) {
+                // Found the target, can stop early
+                break;
+            }
+
+            relax_constrained(
+                graph, current_node, current_volume, node_queue,
+                weights, volumes, min_volume, max_volume,
+                ignored_edges, ignored_nodes
+            );
         }
     }
 
@@ -415,6 +524,39 @@ private:
                 parent[next_node] = current_node;
                 edge_into[next_node] = neighbor.edge_id;
                 node_queue.emplace(next_node, dist_to_next);
+            }
+        }
+    }
+
+    // Relaxation, with "volume" constraints.
+    void relax_constrained(
+        const GraphViewType& graph, const TSize current_node, const double cur_volume, HeapType& node_queue,
+        const WeightVec& weights, const WeightVec& volumes, const double min_volume, const double max_volume,
+        const EdgeIdSet& ignored_edges, const NodeIdSet& ignored_nodes
+    ) {
+        for (const auto& neighbor : graph.OutNeighbours(current_node)) {
+            // Don't update parent + edge in if we've already added the neighbor to the shortest path,
+            // or we should ignore the edge or neighbor node.
+            if (added[neighbor.node_id] || ignored_edges.contains(neighbor.edge_id) || ignored_nodes.contains(neighbor.node_id)) {
+                continue;
+            }
+            auto next_node = neighbor.node_id;
+            double edge_weight = weights[neighbor.edge_id];
+            double edge_volume = volumes[neighbor.edge_id];
+            double dist_to_next = dist_to[current_node] + edge_weight;
+            double next_volume = cur_volume + edge_volume;
+
+            // Skip edges that would violate volume constraint.
+            if (next_volume < min_volume || next_volume > max_volume) {
+                continue;
+            }
+
+            if (dist_to[next_node] > (dist_to_next + EPSILON)) {
+                dist_to[next_node] = dist_to_next;
+
+                parent[next_node] = current_node;
+                edge_into[next_node] = neighbor.edge_id;
+                node_queue.emplace(next_node, dist_to_next, next_volume);
             }
         }
     }
