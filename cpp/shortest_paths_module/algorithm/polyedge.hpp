@@ -107,14 +107,30 @@ public:
     /// @param x The vector of x-values for points along the curve.
     /// @param y The vector of y-values for points along the curve.
     /// @throws std::logic_error if the NNLS solver somehow returns negative coefficients.
+    /// @throws std::invalid_argument if the sizes of the vectors don't match or contain non-finite values.
     template <typename DerivedX, typename DerivedY>
     void calculate_coefficients(const Eigen::MatrixBase<DerivedX> &x, const Eigen::MatrixBase<DerivedY> &y) {
+        if (x.size() < 2 || y.size() < 2 || x.size() != y.size()) {
+            throw std::invalid_argument(fmt::format(
+                "Invalid vector sizes for edge {}: dim(x)={}, dim(y)={}, require dim(x) = dim(y) > 1",
+                id_, x.size(), y.size()
+            ));
+        }
+
         // Initialize the matrix as required by the NNLS solver.
         Eigen::MatrixXd matrix(x.size(), y.size());
-        for (auto i = 0; i < x.size(); i++) {
-            for (auto j = 0; j < y.size(); j++) {
-                matrix(i, j) = pow(x(i), j);
+        if (x.size() > 2) {
+            for (auto i = 0; i < x.size(); i++) {
+                for (auto j = 0; j < y.size(); j++) {
+                    matrix(i, j) = pow(x(i), j);
+                }
             }
+        } else {
+            // If |x| = 2, fit to f(x) = a + bx^2 instead of f(x) = a + bx
+            matrix(0, 0) = x(0);
+            matrix(0, 1) = pow(x(0), 2);
+            matrix(1, 0) = x(1);
+            matrix(1, 1) = pow(x(1), 2);
         }
 
         Eigen::NNLS<Eigen::MatrixXd> nnls_solver(matrix);

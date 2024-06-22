@@ -4,7 +4,9 @@ find_package(fmt)
 set(shortest_paths_src
     shortest_paths_module.cpp
     algorithm/dijkstra.cpp
-    algorithm/yens.cpp)
+    algorithm/yens.cpp
+    util/conversions.cpp
+)
 
 add_query_module(shortest_paths 1 "${shortest_paths_src}")
 
@@ -19,7 +21,9 @@ if (NOT MAGE_CUGRAPH_ENABLE)
     set(shortest_paths_test_src
         shortest_paths_module_test.cpp
         algorithm/dijkstra.cpp
-        algorithm/yens.cpp)
+        algorithm/yens.cpp
+        util/conversions.cpp
+    )
     
     add_executable(shortest_paths_test "${shortest_paths_test_src}")
     target_include_directories(shortest_paths_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

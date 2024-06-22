@@ -1571,57 +1571,50 @@ TEST(ShortestPaths, FrankWolfe_Simple) {
     ASSERT_TRUE(optimizer.is_valid());
     
     const auto& solution = optimizer.result();
-    std::cerr << "Solution: [" << solution[0] << ", " << solution[1] << "]" << std::endl;
     ASSERT_EQ(solution.size(), 2);
     // Should be either [0, 1] or [1, 0]
     ASSERT_TRUE((abs(solution[0] - 1.0) < 1.0e-6) xor (abs(solution[1] - 1.0) < 1.0e-6));
     ASSERT_FLOAT_EQ(optimizer.expected_output(), 1.0);
 }
 
-/* Edges marked with weights.
+/* Edges marked with id:output curve.
  *
- *       ┌──── 2 ────┐
+ *       ┌─ 0:2-0.1x─┐
  *       │           │
  *       │           │
  * ┌───┐ │           │  ┌───┐               ┌───┐
- * │ 0 ├─┼──── 1 ────┼─►│ 1 ├─────1────────►│ 2 │
+ * │ 0 ├─┼─── 1:1 ───┼─►│ 1 ├─────3:1──────►│ 2 │
  * └───┘ │           │  └───┘               └───┘
  *       │           │
  *       │           │
- *       └──── 3 ────┘
+ *       └─ 2:3-.2x² ┘
  */
 TEST(ShortestPaths, OptimizeFlow_Simple) {
-    auto G = mg_generate::BuildWeightedGraph(
-        3,
-        {
-            /*0*/ {{0, 1}, 2.0},
-            /*1*/ {{0, 1}, 1.0},
-            /*2*/ {{0, 1}, 3.0},
-            /*3*/ {{1, 2}, 1.0},
-        },
-        mg_graph::GraphType::kDirectedGraph
-    );
-    std::vector<shortest_paths::Path<uint64_t>> paths {
-        {{0, 1, 2}, {0, 3}, {2, 1}, {3}},
-        {{0, 1, 2}, {1, 3}, {1, 1}, {2}},
+    using PolyEdge = shortest_paths::PolyEdge<uint64_t>;
+    using EdgeNetwork = shortest_paths::EdgeNetwork<uint64_t>;
+
+    const PolyEdge edge_0(0, Eigen::VectorXd{2.0, -0.1, 0.0});
+    const PolyEdge edge_1(0, Eigen::VectorXd{1.0, 0.0, 0.0});
+    const PolyEdge edge_2(0, Eigen::VectorXd{3.0, 0.0, -0.2});
+    const PolyEdge edge_3(0, Eigen::VectorXd{1.0, 0.0, 0.0});
+
+    std::vector<std::vector<PolyEdge>> paths{
+        {edge_0, edge_3},
+        {edge_1, edge_3},
+        {edge_2, edge_3}
     };
-    std::vector<std::vector<double>> x_coords{
-        {0.0, 1.0, 2.0},
-        {0.0, 1.0, 2.0},
-        {0.0, 1.0, 2.0},
-        {0.0, 1.0, 2.0},
-    };
-    std::vector<std::vector<double>> y_coords{
-        {2.0, 2.0, 2.0},
-        {1.0, 1.0, 1.0},
-        {3.0, 3.0, 3.0},
-        {1.0, 1.0, 1.0},
-    };
+    EdgeNetwork network(paths);
+
     const double input_flow = 60.0;
 
-    auto result = shortest_paths::OptimizeFlows<>(*G, paths, x_coords, y_coords, input_flow);
+    auto result = shortest_paths::OptimizeFlows<>(network, input_flow);
 
     ASSERT_TRUE(result.success);
+    auto result_sum = std::accumulate(result.input_amounts.begin(), result.input_amounts.end(), 0.0);
+    auto ratios_sum = std::accumulate(result.input_ratios.begin(), result.input_ratios.end(), 0.0);
+    ASSERT_FLOAT_EQ(result_sum, input_flow);
+    ASSERT_FLOAT_EQ(ratios_sum, 1.0);
+    ASSERT_GT(result.expected_output, 0.0);
 }
 
 int main(int argc, char **argv) {

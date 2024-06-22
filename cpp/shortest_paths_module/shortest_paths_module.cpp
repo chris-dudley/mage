@@ -22,6 +22,7 @@
 #include "algorithm/optimize.hpp"
 
 #include "util/options.hpp"
+#include "util/conversions.hpp"
 
 #define RECORD_NAME(x) (std::string((x)).c_str())
 

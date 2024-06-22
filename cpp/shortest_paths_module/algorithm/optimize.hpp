@@ -114,6 +114,9 @@ FrankWolfe<TSize>::FrankWolfe(
       ftol_flag(false),
       ptol_flag(false),
       xtol_flag(false) {
+  // Disable Highs logging to console
+  highs.setOptionValue("log_to_console", false);
+
   // Initialize values
   this->solution = initial_guess;
   this->solution_old = initial_guess;
@@ -277,35 +280,17 @@ double FrankWolfe<TSize>::expected_output() const {
 }
 
 template <typename TSize = std::uint64_t>
-EdgeNetwork<TSize> PathsToEdgeNetwork(
-  const std::vector<Path<TSize>>& paths,
-  const std::vector<std::vector<double>>& x_coords, std::vector<std::vector<double>>& y_coords
-) {
-  std::vector<std::vector<PolyEdge<TSize>>> edges;
-
-  for (const auto& path : paths) {
-    std::vector<PolyEdge<TSize>> poly_path;
-    for (auto edge_id: path.edges) {
-      poly_path.emplace_back(edge_id, x_coords.at(edge_id), y_coords.at(edge_id));
-    }
-    edges.emplace_back(std::move(poly_path));
-  }
-
-  return EdgeNetwork(std::move(edges));
-}
-
-template <typename TSize = std::uint64_t>
 OptimizationResult OptimizeFlows(
-  const mg_graph::GraphView<TSize> &graph, const std::vector<Path<TSize>> &paths,
-  const std::vector<std::vector<double>>& x_coords, std::vector<std::vector<double>>& y_coords,
+  const EdgeNetwork<TSize>& network,
   const double input_flow,
   const std::optional<std::vector<double>>& initial_allocations = std::nullopt,
   const bool initial_allocation_ratios = false,
   const double ftol = 1.0e-6, const double ptol = 1.0e-6, const double xtol = 1.0e-4, const uint max_iter = 50
 ) {
+  const auto num_paths = network.num_paths();
   OptimizationResult result{
-    std::vector<double>(paths.size(), 0.0),
-    std::vector<double>(paths.size(), 0.0),
+    std::vector<double>(num_paths, 0.0),
+    std::vector<double>(num_paths, 0.0),
     0.0,
     false
   };
@@ -316,10 +301,13 @@ OptimizationResult OptimizeFlows(
     return result;
   }
 
+  // Sanity checks on coordinate vectors
+  
+
   // Set up initial guesses
-  Eigen::VectorXd allocations(paths.size());
+  Eigen::VectorXd allocations(num_paths);
   if (initial_allocations) {
-    if (initial_allocations->size() != paths.size()) {
+    if (initial_allocations->size() != num_paths) {
       throw std::domain_error(fmt::format("Initial allocations ({}) must match number of paths ({})", initial_allocations->size(), paths.size()));
     }
     Eigen::Map<const Eigen::VectorXd> init_alloc_vec(initial_allocations->data(), initial_allocations->size());
@@ -341,24 +329,23 @@ OptimizationResult OptimizeFlows(
     }
   } else {
     // Default to even spread
-    allocations.setConstant(1.0 / paths.size());
+    allocations.setConstant(1.0 / num_paths);
   }
 
-  EdgeNetwork<TSize> edge_network = PathsToEdgeNetwork(paths, x_coords, y_coords);
-  auto target_func = [&edge_network, input_flow](const Eigen::VectorXd& allocs) -> double {
-    return edge_network.evaluate_allocations(allocs * input_flow);
+  auto target_func = [&network, input_flow](const Eigen::VectorXd& allocs) -> double {
+    return network.evaluate_allocations(allocs * input_flow);
   };
 
-  FrankWolfe<TSize> optimizer(paths.size(), target_func, allocations, options);
+  FrankWolfe<TSize> optimizer(num_paths, target_func, allocations, options);
 
   result.success = optimizer.run();
   if (result.success) {
     const auto& solution = optimizer.result();
-    if (solution.size() > paths.size()) {
+    if (static_cast<size_t>(solution.size()) > paths.size()) {
       throw std::runtime_error(fmt::format(
         "Optimizer returned more solutions ({}) than we have paths ({})!",
         solution.size(),
-        paths.size()
+        num_paths
       ));
     }
     for (auto i = 0; i < solution.size(); i++) {
