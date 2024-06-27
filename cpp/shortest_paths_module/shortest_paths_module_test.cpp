@@ -1543,13 +1543,13 @@ TEST(ShortestPaths, FrankWolfe_Simple) {
   ASSERT_DOUBLE_EQ(optimizer.expected_output(), 1.0);
 }
 
-/* Edges marked with id:output curve.
+/* Edges marked with id:price curve.
  *
  *       ┌─ 0:2+0.2x─┐
  *       │           │
  *       │           │
  * ┌───┐ │           │  ┌───┐               ┌───┐
- * │ 0 ├─┼─ 1:0.5x ──┼─►│ 1 ├─────3:x──────►│ 2 │
+ * │ 0 ├─┼─ 1:0.5x ──┼─►│ 1 ├─────3:1──────►│ 2 │
  * └───┘ │           │  └───┘               └───┘
  *       │           │
  *       │           │
@@ -1562,7 +1562,7 @@ TEST(ShortestPaths, OptimizeFlow_Simple) {
   const PolyEdge edge_0(0, Eigen::VectorXd{{2.0, 0.2, 0.0}});
   const PolyEdge edge_1(1, Eigen::VectorXd{{0.0, 0.5, 0.0}});
   const PolyEdge edge_2(2, Eigen::VectorXd{{1.0, 0.0, 0.1}});
-  const PolyEdge edge_3(3, Eigen::VectorXd{{0.0, 1.0, 0.0}});
+  const PolyEdge edge_3(3, Eigen::VectorXd{{1.0, 0.0, 0.0}});
 
   std::vector<std::vector<PolyEdge>> paths{{edge_0, edge_3}, {edge_1, edge_3}, {edge_2, edge_3}};
   EdgeNetwork network(paths);
