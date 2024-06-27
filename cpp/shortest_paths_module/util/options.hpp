@@ -2,41 +2,30 @@
 
 #include <optional>
 #include <string_view>
+#include <vector>
 
 #include <mgp.hpp>
-
-#include "util/map.hpp"
 
 namespace shortest_paths {
 namespace util {
 
 class Options {
-public:
-    Options(): _map()
-    {}
-    Options(mgp::Map&& map): _map(std::move(map))
-    {}
-    Options(const mgp::Map& map): _map(map)
-    {}
+ public:
+  Options();
+  Options(mgp::Map &&map);
+  Options(const mgp::Map &map);
 
-    std::optional<std::string_view> StringView(std::string_view key) const {
-        return MapGetStringViewOpt(_map, key);
-    }
+  std::optional<std::string_view> StringView(std::string_view key) const;
+  std::optional<std::string> String(std::string_view key) const;
+  std::optional<double> Numeric(std::string_view key) const;
+  std::optional<int64_t> Integer(std::string_view key) const;
+  std::optional<mgp::List> List(std::string_view key) const;
+  std::optional<bool> Bool(std::string_view key) const;
+  std::optional<std::vector<double>> NumericList(std::string_view key) const;
 
-    std::optional<std::string> String(std::string_view key) const {
-        return MapGetStringOpt(_map, key);
-    }
-
-    std::optional<double> Numeric(std::string_view key) const {
-        return MapGetNumericOpt(_map, key);
-    }
-
-    std::optional<mgp::List> List(std::string_view key) const {
-        return MapGetListOpt(_map, key);
-    }
-private:
-    mgp::Map _map;
+ private:
+  mgp::Map _map;
 };
 
-} // namespace util
-} // namespace shortest_path
+}  // namespace util
+}  // namespace shortest_paths

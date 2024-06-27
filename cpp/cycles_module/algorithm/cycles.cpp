@@ -1,3 +1,4 @@
+#include <cstdint>
 #include <unordered_set>
 
 #include <mg_exceptions.hpp>

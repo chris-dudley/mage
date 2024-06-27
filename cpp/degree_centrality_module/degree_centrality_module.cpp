@@ -1,3 +1,4 @@
+#include <cstdint>
 #include <mg_exceptions.hpp>
 #include <mg_utils.hpp>
 

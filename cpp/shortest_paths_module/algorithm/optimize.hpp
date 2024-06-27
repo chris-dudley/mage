@@ -1,14 +1,15 @@
 #pragma once
 
-#include <vector>
-#include <optional>
+#include <cmath>
 #include <functional>
+#include <optional>
+#include <stdexcept>
+#include <vector>
 
 #include <mg_graph.hpp>
 #include "Highs.h"
 #include "libs/Eigen/Core"
 
-#include "path.hpp"
 #include "polyedge.hpp"
 
 namespace shortest_paths {
@@ -29,11 +30,11 @@ struct OptimizationOptions {
 
 template <typename TSize = std::uint64_t>
 class FrankWolfe {
-public:
-  using TargetFunc = std::function<double(const Eigen::VectorXd&)>;
+ public:
+  using TargetFunc = std::function<double(const Eigen::VectorXd &)>;
 
   FrankWolfe(const size_t num_variables, TargetFunc target_function, Eigen::VectorXd initial_guess,
-             const OptimizationOptions& optimization_options);
+             const OptimizationOptions &optimization_options);
 
   /// @brief Updates the weights given a gradient vector
   /// @param gradient Gradient vector
@@ -56,7 +57,7 @@ public:
   /// @brief Determines the gradient by shifting each value of `allocation` individually up and down by `eps`
   /// and evaulating the target function, then taking the average.
   /// Used if no separate gradient function is defined.
-  inline Eigen::VectorXd evaluate_gradient(const Eigen::VectorXd& allocation, const double eps = 1.0e-6) const;
+  inline Eigen::VectorXd evaluate_gradient(const Eigen::VectorXd &allocation, const double eps = 1.0e-6) const;
 
   /// @brief Determines the step size to take between two candidate
   /// solutions using a back-stepping proceedure.
@@ -67,27 +68,24 @@ public:
 
   inline void check_exit_flags();
 
-  bool is_valid() const noexcept {
-    return this->status == HighsStatus::kOk;
-  }
+  bool is_valid() const noexcept { return this->status == HighsStatus::kOk; }
 
   /// @brief Runs the Frank-Wolfe algorithm
   bool run();
 
   /// @brief Returns the run result
-  const Eigen::VectorXd& result() const;
+  const Eigen::VectorXd &result() const;
 
   /// @brief Returns the expected outout for the computed solution input.
   double expected_output() const;
 
-private:
+ private:
   TargetFunc target_func;
   OptimizationOptions options;
 
   HighsModel model;
   Highs highs;
   HighsStatus status;
-  const HighsLp &ptr_lp;
 
   Eigen::VectorXd solution;
   Eigen::VectorXd solution_old;
@@ -98,19 +96,15 @@ private:
   bool ftol_flag;
   bool ptol_flag;
   bool xtol_flag;
-
 };
 
 template <typename TSize>
-FrankWolfe<TSize>::FrankWolfe(
-  const size_t num_variables, TargetFunc target_function,
-  Eigen::VectorXd initial_guess, const OptimizationOptions& optimization_options
-)
+FrankWolfe<TSize>::FrankWolfe(const size_t num_variables, TargetFunc target_function, Eigen::VectorXd initial_guess,
+                              const OptimizationOptions &optimization_options)
     : target_func(target_function),
       options(optimization_options),
       model(),
       highs(),
-      ptr_lp(highs.getLp()),
       ftol_flag(false),
       ptol_flag(false),
       xtol_flag(false) {
@@ -121,6 +115,9 @@ FrankWolfe<TSize>::FrankWolfe(
   this->solution = initial_guess;
   this->solution_old = initial_guess;
   this->fx = target_function(this->solution);
+  if (not std::isfinite(fx)) {
+    throw std::domain_error("target function returned non-finite result for initial guess");
+  }
   this->fx_old = this->fx;
 
   // Create and populate a HighsModel instance for the LP
@@ -165,8 +162,8 @@ FrankWolfe<TSize>::FrankWolfe(
 
 template <typename TSize>
 inline void FrankWolfe<TSize>::update_costs(Eigen::VectorXd &gradient) {
-  assert(gradient.size() == this->ptr_lp.num_col_ && "Number of variables does not match the size of the gradient");
-  this->status = highs.changeColsCost(0, gradient.size()-1, gradient.data());
+  assert(gradient.size() == highs.getLp().num_col_ && "Number of variables does not match the size of the gradient");
+  this->status = highs.changeColsCost(0, gradient.size() - 1, gradient.data());
 }
 
 template <typename TSize>
@@ -180,7 +177,7 @@ inline Eigen::VectorXd FrankWolfe<TSize>::minimize_dot(Eigen::VectorXd &gradient
 
   const HighsSolution &ptr_h_sol = highs.getSolution();
 
-  Eigen::VectorXd solution(this->ptr_lp.num_col_);
+  Eigen::VectorXd solution(highs.getLp().num_col_);
 
   for (uint i = 0; i < solution.size(); i++) {
     solution[i] = ptr_h_sol.col_value[i];
@@ -190,7 +187,7 @@ inline Eigen::VectorXd FrankWolfe<TSize>::minimize_dot(Eigen::VectorXd &gradient
 }
 
 template <typename TSize>
-inline Eigen::VectorXd FrankWolfe<TSize>::evaluate_gradient(const Eigen::VectorXd& allocation, const double eps) const {
+inline Eigen::VectorXd FrankWolfe<TSize>::evaluate_gradient(const Eigen::VectorXd &allocation, const double eps) const {
   Eigen::VectorXd gradient(allocation.size());
   Eigen::VectorXd shift_up = allocation;
   Eigen::VectorXd shift_down = allocation;
@@ -244,16 +241,17 @@ template <typename TSize>
 bool FrankWolfe<TSize>::run() {
   for (uint i = 0; i < options.max_iter; i++) {
     auto gradient = this->evaluate_gradient(this->solution);
-    if (this->status != HighsStatus::kOk)
-      break;
+    if (this->status != HighsStatus::kOk) break;
     auto candidate = this->minimize_dot(gradient);
-    if (this->status != HighsStatus::kOk)
-      break;
+    if (this->status != HighsStatus::kOk) break;
 
     Eigen::VectorXd direction = candidate - this->solution;
     double gamma = this->determine_step(candidate);
 
     double temp = this->target_func(this->solution + gamma * direction);
+    if (not std::isfinite(temp)) {
+      throw std::domain_error(fmt::format("iteration {}: target function returned non-finite value", i));
+    }
     if (this->fx < temp) {
       this->solution_old = this->solution;
       this->fx_old = this->fx;
@@ -270,7 +268,7 @@ bool FrankWolfe<TSize>::run() {
 }
 
 template <typename TSize>
-const Eigen::VectorXd& FrankWolfe<TSize>::result() const {
+const Eigen::VectorXd &FrankWolfe<TSize>::result() const {
   return solution;
 }
 
@@ -280,50 +278,41 @@ double FrankWolfe<TSize>::expected_output() const {
 }
 
 template <typename TSize = std::uint64_t>
-OptimizationResult OptimizeFlows(
-  const EdgeNetwork<TSize>& network,
-  const double input_flow,
-  const std::optional<std::vector<double>>& initial_allocations = std::nullopt,
-  const bool initial_allocation_ratios = false,
-  const double ftol = 1.0e-6, const double ptol = 1.0e-6, const double xtol = 1.0e-4, const uint max_iter = 50
-) {
+OptimizationResult OptimizeFlows(const EdgeNetwork<TSize> &network, const double input_flow,
+                                 const std::optional<std::vector<double>> &initial_allocations = std::nullopt,
+                                 const bool initial_allocation_ratios = false, const double ftol = 1.0e-6,
+                                 const double ptol = 1.0e-6, const double xtol = 1.0e-4, const uint max_iter = 50) {
   const auto num_paths = network.num_paths();
-  OptimizationResult result{
-    std::vector<double>(num_paths, 0.0),
-    std::vector<double>(num_paths, 0.0),
-    0.0,
-    false
-  };
+  OptimizationResult result{std::vector<double>(num_paths, 0.0), std::vector<double>(num_paths, 0.0), 0.0, false};
   OptimizationOptions options{ftol, ptol, xtol, max_iter};
-  if (paths.size() == 0) {
+  if (num_paths == 0) {
     // Nothing to optimize over.
     result.success = true;
     return result;
   }
 
-  // Sanity checks on coordinate vectors
-  
-
   // Set up initial guesses
   Eigen::VectorXd allocations(num_paths);
   if (initial_allocations) {
     if (initial_allocations->size() != num_paths) {
-      throw std::domain_error(fmt::format("Initial allocations ({}) must match number of paths ({})", initial_allocations->size(), paths.size()));
+      throw std::domain_error(fmt::format("Initial allocations ({}) must match number of paths ({})",
+                                          initial_allocations->size(), num_paths));
     }
     Eigen::Map<const Eigen::VectorXd> init_alloc_vec(initial_allocations->data(), initial_allocations->size());
 
     if (initial_allocation_ratios) {
       // Initial allocations are value amounts, make sure they add up to the input flow
-      double alloc_diff = abs(init_alloc_vec.sum() - 1.0); 
+      double alloc_diff = abs(init_alloc_vec.sum() - 1.0);
       if (alloc_diff > xtol) {
         throw std::domain_error(fmt::format("Sum of initial ratio allocations ({}) must be 1.0", init_alloc_vec.sum()));
       }
       allocations = init_alloc_vec;
     } else {
       // Initial allocations are value amounts, make sure they add up to the input flow
-      double alloc_diff = abs(init_alloc_vec.sum() - input_flow); 
+      double alloc_diff = abs(init_alloc_vec.sum() - input_flow);
       if (alloc_diff > xtol) {
-        throw std::domain_error(fmt::format("Sum of initial allocations ({}) must match input flow ({})", init_alloc_vec.sum(), input_flow));
+        throw std::domain_error(fmt::format("Sum of initial allocations ({}) must match input flow ({})",
+                                            init_alloc_vec.sum(), input_flow));
       }
       allocations = init_alloc_vec / input_flow;
     }
@@ -332,7 +321,7 @@ OptimizationResult OptimizeFlows(
     allocations.setConstant(1.0 / num_paths);
   }
 
-  auto target_func = [&network, input_flow](const Eigen::VectorXd& allocs) -> double {
+  auto target_func = [&network, input_flow](const Eigen::VectorXd &allocs) -> double {
     return network.evaluate_allocations(allocs * input_flow);
   };
 
@@ -340,13 +329,10 @@ OptimizationResult OptimizeFlows(
 
   result.success = optimizer.run();
   if (result.success) {
-    const auto& solution = optimizer.result();
-    if (static_cast<size_t>(solution.size()) > paths.size()) {
-      throw std::runtime_error(fmt::format(
-        "Optimizer returned more solutions ({}) than we have paths ({})!",
-        solution.size(),
-        num_paths
-      ));
+    const auto &solution = optimizer.result();
+    if (static_cast<size_t>(solution.size()) > num_paths) {
+      throw std::runtime_error(
+          fmt::format("Optimizer returned more solutions ({}) than we have paths ({})!", solution.size(), num_paths));
     }
     for (auto i = 0; i < solution.size(); i++) {
       result.input_ratios[i] = solution[i];
@@ -354,7 +340,7 @@ OptimizationResult OptimizeFlows(
       result.expected_output = optimizer.expected_output();
     }
   }
-  
+
   return result;
 }
 

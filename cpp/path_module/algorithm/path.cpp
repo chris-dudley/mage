@@ -1,4 +1,5 @@
 #include "path.hpp"
+#include <algorithm>
 
 #include "mgp.hpp"
 

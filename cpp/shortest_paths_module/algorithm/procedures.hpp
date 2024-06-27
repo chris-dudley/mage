@@ -16,6 +16,7 @@ constexpr const std::string_view kProcedureJohnsonsKShortest = "johnsons_k_short
 constexpr const std::string_view kProcedureJohnsonsDisjointKShortest = "johnsons_disjoint_k_shortest";
 constexpr const std::string_view kProcedureDisjointKShortest = "disjoint_k_shortest";
 constexpr const std::string_view kProcedureSuccessiveShortestPaths = "successive_shortest_paths";
+constexpr const std::string_view kProcedureOptimizeFlows = "optimize_flows";
 
 constexpr const std::string_view kArgumentSourceNode = "source_node";
 constexpr const std::string_view kArgumentSourceNodes = "source_nodes";
@@ -41,6 +42,16 @@ constexpr const std::string_view kArgumentRelationshipFixedCostProperty = "relat
 constexpr const std::string_view kArgumentDefaultFixedCost = "default_fixed_cost";
 constexpr const std::string_view kArgumentWeightTransform = "weight_transform";
 constexpr const std::string_view kArgumentOptions = "options";
+constexpr const std::string_view kArgumentPaths = "paths";
+constexpr const std::string_view kArgumentRelationshipXCoordProperty = "relationship_x_coord_property";
+constexpr const std::string_view kArgumentRelationshipYCoordProperty = "relationship_y_coord_property";
+constexpr const std::string_view kArgumentInitialAllocations = "initial_allocations";
+constexpr const std::string_view kArgumentInitialAllocationAreRatios = "initial_allocations_are_ratios";
+constexpr const std::string_view kArgumentFtol = "ftol";
+constexpr const std::string_view kArgumentPtol = "ptol";
+constexpr const std::string_view kArgumentXtol = "xtol";
+constexpr const std::string_view kArgumentMaxIter = "max_iter";
+constexpr const std::string_view kArgumentFit2PointQuadratic = "fix_2point_quadratic";
 
 constexpr const std::string_view kReturnIndex = "index";
 constexpr const std::string_view kReturnSourceNode = "source_node";
@@ -57,5 +68,7 @@ constexpr const std::string_view kReturnNodeWeights = "node_weights";
 constexpr const std::string_view kReturnEdgeWeights = "edge_weights";
 constexpr const std::string_view kReturnFlows = "flows";
 constexpr const std::string_view kReturnPathInputFlow = "path_input_flow";
+constexpr const std::string_view kReturnFlowRatios = "flow_ratios";
+constexpr const std::string_view kReturnExceptedOutputFlow = "expected_output_flow";
 
-} // namespace shortest_paths
+}  // namespace shortest_paths

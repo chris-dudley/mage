@@ -1,28 +1,27 @@
-#include <mgp.hpp>
 #include <mg_utils.hpp>
+#include <mgp.hpp>
 
 #include <cmath>
+#include <optional>
+#include <ranges>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
-#include <ranges>
-#include <optional>
 
 #include <fmt/core.h>
 
-#include "algorithm/shortest_path.hpp"
-#include "algorithm/dijkstra.hpp"
-#include "algorithm/yens.hpp"
-#include "algorithm/procedures.hpp"
 #include "algorithm/bellman_ford.hpp"
+#include "algorithm/disjoint.hpp"
 #include "algorithm/iterative_bf.hpp"
 #include "algorithm/johnsons.hpp"
-#include "algorithm/disjoint.hpp"
-#include "algorithm/successive_shortest_paths.hpp"
 #include "algorithm/optimize.hpp"
+#include "algorithm/procedures.hpp"
+#include "algorithm/shortest_path.hpp"
+#include "algorithm/successive_shortest_paths.hpp"
+#include "algorithm/yens.hpp"
 
-#include "util/options.hpp"
 #include "util/conversions.hpp"
+#include "util/options.hpp"
 
 #define RECORD_NAME(x) (std::string((x)).c_str())
 
@@ -32,9 +31,9 @@ namespace {
 
 // Types of final transform performed on weights when being adjusted
 enum WeightTransform {
-    None, // No transform on weights
-    Log10,  // log10
-    Ln,   // natural logarithm
+  None,   // No transform on weights
+  Log10,  // log10
+  Ln,     // natural logarithm
 };
 
 // For whatever reason, calling ->GetInnerNodeId directly on the unique_ptr returned by Get(Sub)graphView breaks,
@@ -42,1698 +41,1687 @@ enum WeightTransform {
 // the internal IDs in the view. (e.g. there are 8 nodes in the view and you're trying to lookup memgraph_id 9)
 // Creating a function that takes a const mg_graph::GraphView<>& and passing in *ptr makes it work properly, and
 // I'm not sure why.
-uint64_t GetInnerNodeId(const mg_graph::GraphView<>& graph, uint64_t memgraph_id) {
+uint64_t GetInnerNodeId(const mg_graph::GraphView<> &graph, uint64_t memgraph_id) {
+  return graph.GetInnerNodeId(memgraph_id);
+}
+
+std::optional<uint64_t> GetInnerNodeIdOpt(const mg_graph::GraphView<> &graph, uint64_t memgraph_id) {
+  if (graph.NodeExists(memgraph_id)) {
     return graph.GetInnerNodeId(memgraph_id);
+  }
+  return std::nullopt;
 }
 
-std::optional<uint64_t> GetInnerNodeIdOpt(const mg_graph::GraphView<>& graph, uint64_t memgraph_id) {
-    if (graph.NodeExists(memgraph_id)) {
-        return graph.GetInnerNodeId(memgraph_id);
-    }
-    return std::nullopt;
-}
-
-uint64_t GetInnerEdgeId(const mg_graph::GraphView<>& graph, uint64_t memgraph_id) {
-    return graph.GetInnerEdgeId(memgraph_id);
+uint64_t GetInnerEdgeId(const mg_graph::GraphView<> &graph, uint64_t memgraph_id) {
+  return graph.GetInnerEdgeId(memgraph_id);
 }
 
 // Add wrappers for GetMemgraph(Node|Edge)Id just in case.
-uint64_t GetMemgraphNodeId(const mg_graph::GraphView<>& graph, uint64_t inner_id) {
-    return graph.GetMemgraphNodeId(inner_id);
+uint64_t GetMemgraphNodeId(const mg_graph::GraphView<> &graph, uint64_t inner_id) {
+  return graph.GetMemgraphNodeId(inner_id);
 }
-uint64_t GetMemgraphEdgeId(const mg_graph::GraphView<>& graph, uint64_t inner_id) {
-    return graph.GetMemgraphEdgeId(inner_id);
-}
-
-mgp::Path TranslatePath(const mgp::Graph& graph, const mg_graph::GraphView<>& graph_view, const shortest_paths::Path<>& path) {
-    auto source_mgid = mgp::Id::FromUint(GetMemgraphNodeId(graph_view, path.nodes[0]));
-    mgp::Node source_node = graph.GetNodeById(source_mgid);
-    mgp::Path result_path(source_node);
-
-    mgp::Node current_node = source_node;
-    for (size_t edge_index = 0; edge_index < path.size(); edge_index++) {
-        auto from_node_mgid = GetMemgraphNodeId(graph_view, path.nodes[edge_index]);
-        auto to_node_mgid = GetMemgraphNodeId(graph_view, path.nodes[edge_index+1]);
-        auto edge_mgid = GetMemgraphEdgeId(graph_view, path.edges[edge_index]);
-
-        if (from_node_mgid != current_node.Id().AsUint()) {
-            throw std::logic_error("From node in edge does not match current node!");
-        }
-
-        bool found_edge = false;
-        // Search for the matching edge since there's no easy way of pulling out a specific
-        // edge from the graph by ID.
-        for (const auto& relationship : current_node.OutRelationships()) {
-            if (relationship.Id().AsUint() != edge_mgid) {
-                continue;
-            }
-            auto next_node = relationship.To();
-            if (next_node.Id().AsUint() != to_node_mgid) {
-                throw std::logic_error("To node in edge does not match to node in relationship!");
-            }
-
-            found_edge = true;
-
-            result_path.Expand(relationship);
-            current_node = next_node;
-            break;
-        }
-
-        if (!found_edge) {
-            throw std::logic_error("Unable to find matching out relationship");
-        }
-    }
-
-    return result_path;
+uint64_t GetMemgraphEdgeId(const mg_graph::GraphView<> &graph, uint64_t inner_id) {
+  return graph.GetMemgraphEdgeId(inner_id);
 }
 
-mgp::List TranslateNodeList(const mgp::Graph& graph, const mg_graph::GraphView<>& graph_view, const std::vector<uint64_t> node_ids) {
-    mgp::List result(node_ids.size());
-    for (auto node_id : node_ids) {
-        auto mgid = GetMemgraphNodeId(graph_view, node_id);
-        result.Append(mgp::Value(graph.GetNodeById(mgp::Id::FromUint(mgid))));
+mgp::Path TranslatePath(const mgp::Graph &graph, const mg_graph::GraphView<> &graph_view,
+                        const shortest_paths::Path<> &path) {
+  auto source_mgid = mgp::Id::FromUint(GetMemgraphNodeId(graph_view, path.nodes[0]));
+  mgp::Node source_node = graph.GetNodeById(source_mgid);
+  mgp::Path result_path(source_node);
+
+  mgp::Node current_node = source_node;
+  for (size_t edge_index = 0; edge_index < path.size(); edge_index++) {
+    auto from_node_mgid = GetMemgraphNodeId(graph_view, path.nodes[edge_index]);
+    auto to_node_mgid = GetMemgraphNodeId(graph_view, path.nodes[edge_index + 1]);
+    auto edge_mgid = GetMemgraphEdgeId(graph_view, path.edges[edge_index]);
+
+    if (from_node_mgid != current_node.Id().AsUint()) {
+      throw std::logic_error("From node in edge does not match current node!");
     }
-    return result;
+
+    bool found_edge = false;
+    // Search for the matching edge since there's no easy way of pulling out a specific
+    // edge from the graph by ID.
+    for (const auto &relationship : current_node.OutRelationships()) {
+      if (relationship.Id().AsUint() != edge_mgid) {
+        continue;
+      }
+      auto next_node = relationship.To();
+      if (next_node.Id().AsUint() != to_node_mgid) {
+        throw std::logic_error("To node in edge does not match to node in relationship!");
+      }
+
+      found_edge = true;
+
+      result_path.Expand(relationship);
+      current_node = next_node;
+      break;
+    }
+
+    if (!found_edge) {
+      throw std::logic_error("Unable to find matching out relationship");
+    }
+  }
+
+  return result_path;
 }
 
-mgp::List TranslateEdgeList(const mgp::Graph& graph, const mg_graph::GraphView<>& graph_view, const std::vector<uint64_t>& edge_ids) {
-    std::vector<mgp::Value> edges(edge_ids.size());
-    std::unordered_multimap<uint64_t, size_t> mgid_to_index;
-    for (size_t index = 0; index < edge_ids.size(); index++) {
-        auto mgid = GetMemgraphEdgeId(graph_view, edge_ids[index]);
-        mgid_to_index.emplace(mgid, index);
-    }
-    for (auto edge : graph.Relationships()) {
-        auto range = mgid_to_index.equal_range(edge.Id().AsUint());
-        for (auto it = range.first; it != range.second; it++) {
-            edges[it->second] = mgp::Value(edge);
-        }
-    }
-
-    return mgp::List(edges);
+mgp::List TranslateNodeList(const mgp::Graph &graph, const mg_graph::GraphView<> &graph_view,
+                            const std::vector<uint64_t> node_ids) {
+  mgp::List result(node_ids.size());
+  for (auto node_id : node_ids) {
+    auto mgid = GetMemgraphNodeId(graph_view, node_id);
+    result.Append(mgp::Value(graph.GetNodeById(mgp::Id::FromUint(mgid))));
+  }
+  return result;
 }
 
-template<typename TRange>
-mgp::List ToList(TRange&& range) {
-    mgp::List result(std::ranges::size(range));
-    for (auto&& value : range) {
-        result.Append(mgp::Value(value));
+mgp::List TranslateEdgeList(const mgp::Graph &graph, const mg_graph::GraphView<> &graph_view,
+                            const std::vector<uint64_t> &edge_ids) {
+  std::vector<mgp::Value> edges(edge_ids.size());
+  std::unordered_multimap<uint64_t, size_t> mgid_to_index;
+  for (size_t index = 0; index < edge_ids.size(); index++) {
+    auto mgid = GetMemgraphEdgeId(graph_view, edge_ids[index]);
+    mgid_to_index.emplace(mgid, index);
+  }
+  for (auto edge : graph.Relationships()) {
+    auto range = mgid_to_index.equal_range(edge.Id().AsUint());
+    for (auto it = range.first; it != range.second; it++) {
+      edges[it->second] = mgp::Value(edge);
     }
-    return result;
+  }
+
+  return mgp::List(edges);
 }
 
-std::vector<double> GetEdgeNumericProp(const mgp::Graph& graph, const std::string& prop_name, const double default_score) {
-    size_t num_edges = 0;
-    for (auto _ : graph.Relationships()) {
-        num_edges++;
-    }
-    std::vector<double> scores(num_edges, default_score);
+template <typename TRange>
+mgp::List ToList(TRange &&range) {
+  mgp::List result(std::ranges::size(range));
+  for (auto &&value : range) {
+    result.Append(mgp::Value(value));
+  }
+  return result;
+}
 
-    if (prop_name.empty()) {
-        return scores;
-    }
+std::vector<double> GetEdgeNumericProp(const mgp::Graph &graph, const std::string &prop_name,
+                                       const double default_score) {
+  size_t num_edges = 0;
+  for (auto _ : graph.Relationships()) {
+    num_edges++;
+  }
+  std::vector<double> scores(num_edges, default_score);
 
-    size_t edge_idx = 0;
-    for (const auto relationship : graph.Relationships()) {
-        auto prop = relationship.GetProperty(prop_name);
-        if (prop.IsNumeric()) {
-            scores[edge_idx] = prop.ValueNumeric();
-        }
-        edge_idx++;
-    }
-
+  if (prop_name.empty()) {
     return scores;
+  }
+
+  size_t edge_idx = 0;
+  for (const auto relationship : graph.Relationships()) {
+    auto prop = relationship.GetProperty(prop_name);
+    if (prop.IsNumeric()) {
+      scores[edge_idx] = prop.ValueNumeric();
+    }
+    edge_idx++;
+  }
+
+  return scores;
 }
 
-std::vector<double> GetScores(
-    const mgp::Graph& graph, const mg_graph::GraphView<>& graph_view,
-    const std::string& score_prop_name, double default_score,
-    bool use_weights_if_empty = true
-) {
-    const auto& edges = graph_view.Edges();
-    size_t num_edges = edges.size();
-    std::vector<double> scores(num_edges, default_score);
-    if (score_prop_name.empty() && (!graph_view.IsWeighted() || !use_weights_if_empty)) {
-        return scores;
-    }
-    if (score_prop_name.empty()) {
-        // Default to edge weights
-        for (uint64_t edge_id = 0; edge_id < num_edges; edge_id++) {
-            scores[edge_id] = graph_view.GetWeight(edge_id);
-        }
-        return scores;
-    }
-    for (const auto& relationship : graph.Relationships()) {
-        auto inner_id = GetInnerEdgeId(graph_view, relationship.Id().AsUint());
-        auto score_prop = relationship.GetProperty(score_prop_name);
-    
-        // To match the handling of weights in mg_graph, properties that aren't doubles or ints will receive
-        // the default score.
-        if (score_prop.IsNumeric()) {
-            scores[inner_id] = score_prop.ValueNumeric();
-        }
-    }
-
+std::vector<double> GetScores(const mgp::Graph &graph, const mg_graph::GraphView<> &graph_view,
+                              const std::string &score_prop_name, double default_score,
+                              bool use_weights_if_empty = true) {
+  const auto &edges = graph_view.Edges();
+  size_t num_edges = edges.size();
+  std::vector<double> scores(num_edges, default_score);
+  if (score_prop_name.empty() && (!graph_view.IsWeighted() || !use_weights_if_empty)) {
     return scores;
-}
+  }
+  if (score_prop_name.empty()) {
+    // Default to edge weights
+    for (uint64_t edge_id = 0; edge_id < num_edges; edge_id++) {
+      scores[edge_id] = graph_view.GetWeight(edge_id);
+    }
+    return scores;
+  }
+  for (const auto &relationship : graph.Relationships()) {
+    auto inner_id = GetInnerEdgeId(graph_view, relationship.Id().AsUint());
+    auto score_prop = relationship.GetProperty(score_prop_name);
 
+    // To match the handling of weights in mg_graph, properties that aren't doubles or ints will receive
+    // the default score.
+    if (score_prop.IsNumeric()) {
+      scores[inner_id] = score_prop.ValueNumeric();
+    }
+  }
+
+  return scores;
+}
 
 // Helper function for creating a graph view (like mg_util::GetGraphView) that supports assigning
 // computed weights to edges instead of using a property.
-template<typename TSize = std::uint64_t>
-std::unique_ptr<mg_graph::Graph<TSize>>
-CreateWeightedGraphView(const mgp::Graph& graph, const std::vector<double>& weights) {
-    auto view = std::make_unique<mg_graph::Graph<TSize>>();
-    view->SetIsTransactional(graph.IsTransactional());
+template <typename TSize = std::uint64_t>
+std::unique_ptr<mg_graph::Graph<TSize>> CreateWeightedGraphView(const mgp::Graph &graph,
+                                                                const std::vector<double> &weights) {
+  auto view = std::make_unique<mg_graph::Graph<TSize>>();
+  view->SetIsTransactional(graph.IsTransactional());
 
-    // Sanity check # edges vs weights
-    size_t num_edges = 0;
-    for (auto _ : graph.Relationships()) {
-        num_edges++;
-    }
-    if (num_edges > weights.size()) {
-        throw std::invalid_argument(fmt::format("not enough weights: {} edges > {} weights", num_edges, weights.size()));
-    }
+  // Sanity check # edges vs weights
+  size_t num_edges = 0;
+  for (auto _ : graph.Relationships()) {
+    num_edges++;
+  }
+  if (num_edges > weights.size()) {
+    throw std::invalid_argument(fmt::format("not enough weights: {} edges > {} weights", num_edges, weights.size()));
+  }
 
-    for (const auto node : graph.Nodes()) {
-        view->CreateNode(node.Id().AsUint());
-    }
+  for (const auto node : graph.Nodes()) {
+    view->CreateNode(node.Id().AsUint());
+  }
 
-    size_t edge_idx = 0;
-    for (const auto edge : graph.Relationships()) {
-        view->CreateEdge(
-            edge.From().Id().AsUint(), edge.To().Id().AsUint(),
-            mg_graph::GraphType::kDirectedGraph,
-            edge.Id().AsUint(), true,
-            weights[edge_idx++]
-        );
-    }
+  size_t edge_idx = 0;
+  for (const auto edge : graph.Relationships()) {
+    view->CreateEdge(edge.From().Id().AsUint(), edge.To().Id().AsUint(), mg_graph::GraphType::kDirectedGraph,
+                     edge.Id().AsUint(), true, weights[edge_idx++]);
+  }
 
-    return view;
+  return view;
 }
 
-WeightTransform StringToWeightTransform(const std::string_view& str) {
-    if (str.empty() || str == "none") {
-        return WeightTransform::None;
-    }
-    if (str == "log10") {
-        return WeightTransform::Log10;
-    }
-    if (str == "ln" || str == "log") {
-        return WeightTransform::Ln;
-    }
-    throw mgp::ValueException(fmt::format("Invalid weight transform \"{}\"", str));
+WeightTransform StringToWeightTransform(const std::string_view &str) {
+  if (str.empty() || str == "none") {
+    return WeightTransform::None;
+  }
+  if (str == "log10") {
+    return WeightTransform::Log10;
+  }
+  if (str == "ln" || str == "log") {
+    return WeightTransform::Ln;
+  }
+  throw mgp::ValueException(fmt::format("Invalid weight transform \"{}\"", str));
 }
 
-void AdjustWeights(std::vector<double>& weights, WeightTransform transform) {
-    switch (transform) {
+void AdjustWeights(std::vector<double> &weights, WeightTransform transform) {
+  switch (transform) {
     case WeightTransform::None:
-        // nothing
-        break;
+      // nothing
+      break;
     case WeightTransform::Log10:
-        for (size_t i = 0; i < weights.size(); i++) {
-            weights[i] = std::log10(weights[i]);
-        }
+      for (size_t i = 0; i < weights.size(); i++) {
+        weights[i] = std::log10(weights[i]);
+      }
     case WeightTransform::Ln:
-        for (size_t i = 0; i < weights.size(); i++) {
-            weights[i] = std::log(weights[i]);
-        }
-    }
+      for (size_t i = 0; i < weights.size(); i++) {
+        weights[i] = std::log(weights[i]);
+      }
+  }
 }
 
-template<typename TSize = std::uint64_t>
-std::unique_ptr<mg_graph::Graph<TSize>>
-GetGraphViewAdjusted(
-    const mgp::Graph& graph,
-    const std::string& weight_prop, const double default_weight,
-    const std::string& fixed_cost_prop, const double default_fixed_cost,
-    const double flow_amount,
-    const WeightTransform transform = WeightTransform::None
-) {
-    auto weights = GetEdgeNumericProp(graph, weight_prop, default_weight);
-    if (fixed_cost_prop.empty()) {
-        return CreateWeightedGraphView(graph, weights);
-    }
-    if (flow_amount <= 0) {
-        throw mgp::ValueException("for fixed edge cost adjustment, flow must be > 0");
-    }
-
-    auto fixed_costs = GetEdgeNumericProp(graph, fixed_cost_prop, default_fixed_cost);
-
-    // Adjust weights by scale of (1 + fixed_cost/flow_amount)
-    for (size_t idx = 0; idx < weights.size(); idx++) {
-        weights[idx] = (1.0 + (fixed_costs[idx] / flow_amount)) * weights[idx];
-    }
-
-    AdjustWeights(weights, transform);
-
+template <typename TSize = std::uint64_t>
+std::unique_ptr<mg_graph::Graph<TSize>> GetGraphViewAdjusted(const mgp::Graph &graph, const std::string &weight_prop,
+                                                             const double default_weight,
+                                                             const std::string &fixed_cost_prop,
+                                                             const double default_fixed_cost, const double flow_amount,
+                                                             const WeightTransform transform = WeightTransform::None) {
+  auto weights = GetEdgeNumericProp(graph, weight_prop, default_weight);
+  if (fixed_cost_prop.empty()) {
     return CreateWeightedGraphView(graph, weights);
+  }
+  if (flow_amount <= 0) {
+    throw mgp::ValueException("for fixed edge cost adjustment, flow must be > 0");
+  }
+
+  auto fixed_costs = GetEdgeNumericProp(graph, fixed_cost_prop, default_fixed_cost);
+
+  // Adjust weights by scale of (1 + fixed_cost/flow_amount)
+  for (size_t idx = 0; idx < weights.size(); idx++) {
+    weights[idx] = (1.0 + (fixed_costs[idx] / flow_amount)) * weights[idx];
+  }
+
+  AdjustWeights(weights, transform);
+
+  return CreateWeightedGraphView(graph, weights);
 }
 
 void YensKShortestPaths(mgp_list *args, mgp_graph *memgraph_graph, mgp_result *result, mgp_memory *memory) {
-    // Indicies in the arguments list for parameters
-    enum ArgIdx : size_t {
-        Source, Sink, K, WeightProp, DefaultWeight, Threads
-    };
+  // Indicies in the arguments list for parameters
+  enum ArgIdx : size_t { Source, Sink, K, WeightProp, DefaultWeight, Threads };
 
-    mgp::MemoryDispatcherGuard mem_guard(memory);
-    mgp::Graph graph{memgraph_graph};
+  mgp::MemoryDispatcherGuard mem_guard(memory);
+  mgp::Graph graph{memgraph_graph};
 
-    const auto arguments = mgp::List(args);
-    const auto record_factory = mgp::RecordFactory(result);
-    try {
-        const auto source_node = arguments[ArgIdx::Source].ValueNode();
-        const auto sink_node = arguments[ArgIdx::Sink].ValueNode();
-        const auto K = arguments[ArgIdx::K].ValueInt();
-        const auto weight_property = arguments[ArgIdx::WeightProp].ValueString();
-        const auto default_weight = arguments[ArgIdx::DefaultWeight].ValueDouble();
-        const int threads = arguments[ArgIdx::Threads].ValueInt();
+  const auto arguments = mgp::List(args);
+  const auto record_factory = mgp::RecordFactory(result);
+  try {
+    const auto source_node = arguments[ArgIdx::Source].ValueNode();
+    const auto sink_node = arguments[ArgIdx::Sink].ValueNode();
+    const auto K = arguments[ArgIdx::K].ValueInt();
+    const auto weight_property = arguments[ArgIdx::WeightProp].ValueString();
+    const auto default_weight = arguments[ArgIdx::DefaultWeight].ValueDouble();
+    const int threads = arguments[ArgIdx::Threads].ValueInt();
 
-        bool weighted = ! weight_property.empty();
-        const char * weight_prop_cstr = weighted ? weight_property.data() : nullptr;
+    bool weighted = !weight_property.empty();
+    const char *weight_prop_cstr = weighted ? weight_property.data() : nullptr;
 
-        if (K < 0) {
-            throw mgp::ValueException("K cannot be negative");
-        }
-        if (K == 0) {
-            // Why did you even call this procedure?
-            return;
-        }
-
-        auto graph_view_ptr = mg_utility::GetGraphView(
-            memgraph_graph, result, memory, mg_graph::GraphType::kDirectedGraph,
-            weighted, weight_prop_cstr, default_weight
-        );
-
-        const mg_graph::GraphView<>& graph_view = *graph_view_ptr;
-
-        const auto source_mgid = source_node.Id().AsUint();
-        const auto sink_mgid = sink_node.Id().AsUint();
-
-        const auto maybe_source_id = GetInnerNodeIdOpt(graph_view, source_mgid);
-        const auto maybe_sink_id = GetInnerNodeIdOpt(graph_view, sink_mgid);
-        if (!maybe_source_id || !maybe_sink_id) {
-            // Either source or sink is not in subgraph, so there can be no paths between them.
-            return;
-        }
-        const auto source_id = maybe_source_id.value();
-        const auto sink_id = maybe_sink_id.value();
-
-        auto abort_func = [&graph] () { graph.CheckMustAbort(); };
-        const auto paths = shortest_paths::KShortestPaths(graph_view, source_id, sink_id, K, abort_func, threads);
-
-        for (std::size_t path_index = 0; path_index < paths.size(); path_index++) {
-            const auto& path = paths[path_index];
-
-            mgp::Path result_path = TranslatePath(graph, graph_view, path);
-            mgp::Node current_node = source_node;
-            mgp::List costs(path.costs.size()); // accumulated cost at each node
-            for (auto cost : path.costs) {
-                costs.Append(mgp::Value(cost));
-            }
-
-            auto record = record_factory.NewRecord();
-            record.Insert(std::string(shortest_paths::kReturnIndex).c_str(), int64_t(path_index));
-            record.Insert(std::string(shortest_paths::kReturnSourceNode).c_str(), source_node);
-            record.Insert(std::string(shortest_paths::kReturnTargetNode).c_str(), sink_node);
-            record.Insert(std::string(shortest_paths::kReturnTotalCost).c_str(), path.total_cost);
-            record.Insert(std::string(shortest_paths::kReturnCosts).c_str(), costs);
-            record.Insert(std::string(shortest_paths::kReturnPath).c_str(), result_path);
-        }
-    } catch (const std::exception& e) {
-        record_factory.SetErrorMessage(e.what());
-        return;
+    if (K < 0) {
+      throw mgp::ValueException("K cannot be negative");
     }
+    if (K == 0) {
+      // Why did you even call this procedure?
+      return;
+    }
+
+    auto graph_view_ptr = mg_utility::GetGraphView(memgraph_graph, result, memory, mg_graph::GraphType::kDirectedGraph,
+                                                   weighted, weight_prop_cstr, default_weight);
+
+    const mg_graph::GraphView<> &graph_view = *graph_view_ptr;
+
+    const auto source_mgid = source_node.Id().AsUint();
+    const auto sink_mgid = sink_node.Id().AsUint();
+
+    const auto maybe_source_id = GetInnerNodeIdOpt(graph_view, source_mgid);
+    const auto maybe_sink_id = GetInnerNodeIdOpt(graph_view, sink_mgid);
+    if (!maybe_source_id || !maybe_sink_id) {
+      // Either source or sink is not in subgraph, so there can be no paths between them.
+      return;
+    }
+    const auto source_id = maybe_source_id.value();
+    const auto sink_id = maybe_sink_id.value();
+
+    auto abort_func = [&graph]() { graph.CheckMustAbort(); };
+    const auto paths = shortest_paths::KShortestPaths(graph_view, source_id, sink_id, K, abort_func, threads);
+
+    for (std::size_t path_index = 0; path_index < paths.size(); path_index++) {
+      const auto &path = paths[path_index];
+
+      mgp::Path result_path = TranslatePath(graph, graph_view, path);
+      mgp::Node current_node = source_node;
+      mgp::List costs(path.costs.size());  // accumulated cost at each node
+      for (auto cost : path.costs) {
+        costs.Append(mgp::Value(cost));
+      }
+
+      auto record = record_factory.NewRecord();
+      record.Insert(std::string(shortest_paths::kReturnIndex).c_str(), int64_t(path_index));
+      record.Insert(std::string(shortest_paths::kReturnSourceNode).c_str(), source_node);
+      record.Insert(std::string(shortest_paths::kReturnTargetNode).c_str(), sink_node);
+      record.Insert(std::string(shortest_paths::kReturnTotalCost).c_str(), path.total_cost);
+      record.Insert(std::string(shortest_paths::kReturnCosts).c_str(), costs);
+      record.Insert(std::string(shortest_paths::kReturnPath).c_str(), result_path);
+    }
+  } catch (const std::exception &e) {
+    record_factory.SetErrorMessage(e.what());
+    return;
+  }
 }
 
-
 void BellmanFordProcedure(mgp_list *args, mgp_graph *memgraph_graph, mgp_result *result, mgp_memory *memory) {
-    // Indicies in the arguments list for parameters
-    enum ArgIdx : size_t {
-        Source, Targets, WeightProp, DefaultWeight
-    };
+  // Indicies in the arguments list for parameters
+  enum ArgIdx : size_t { Source, Targets, WeightProp, DefaultWeight };
 
-    mgp::MemoryDispatcherGuard mem_guard(memory);
-    mgp::Graph graph{memgraph_graph};
+  mgp::MemoryDispatcherGuard mem_guard(memory);
+  mgp::Graph graph{memgraph_graph};
 
-    const auto arguments = mgp::List(args);
-    const auto record_factory = mgp::RecordFactory(result);
-    try {
+  const auto arguments = mgp::List(args);
+  const auto record_factory = mgp::RecordFactory(result);
+  try {
+    const auto source_node = arguments[ArgIdx::Source].ValueNode();
+    const auto target_nodes = arguments[ArgIdx::Targets].ValueList();
+    const auto weight_property = arguments[ArgIdx::WeightProp].ValueString();
+    const auto default_weight = arguments[ArgIdx::DefaultWeight].ValueDouble();
 
-        const auto source_node = arguments[ArgIdx::Source].ValueNode();
-        const auto target_nodes = arguments[ArgIdx::Targets].ValueList();
-        const auto weight_property = arguments[ArgIdx::WeightProp].ValueString();
-        const auto default_weight = arguments[ArgIdx::DefaultWeight].ValueDouble();
+    bool weighted = !weight_property.empty();
+    const char *weight_prop_cstr = weighted ? weight_property.data() : nullptr;
 
-        bool weighted = ! weight_property.empty();
-        const char * weight_prop_cstr = weighted ? weight_property.data() : nullptr;
+    auto graph_view_ptr = mg_utility::GetGraphView(memgraph_graph, result, memory, mg_graph::GraphType::kDirectedGraph,
+                                                   weighted, weight_prop_cstr, default_weight);
 
-        auto graph_view_ptr = mg_utility::GetGraphView(
-            memgraph_graph, result, memory, mg_graph::GraphType::kDirectedGraph,
-            weighted, weight_prop_cstr, default_weight
-        );
+    const mg_graph::GraphView<> &graph_view = *graph_view_ptr;
 
-        const mg_graph::GraphView<>& graph_view = *graph_view_ptr;
-
-        const auto source_mgid = source_node.Id().AsUint();
-        const auto maybe_source_id = GetInnerNodeIdOpt(graph_view, source_mgid);
-        if (!maybe_source_id) {
-            // Source is not in subgraph, so there can be no paths from it.
-            return;
-        }
-        const auto source_id = maybe_source_id.value();
-
-        shortest_paths::BellmanFordPathfinder<uint64_t> pathfinder(graph_view, source_id);
-        if (pathfinder.has_negative_cycle()) {
-            auto cycle = pathfinder.negative_cycle().value();
-            mgp::Path result_path = TranslatePath(graph, graph_view, cycle);
-            mgp::Node cycle_source = result_path.GetNodeAt(0);
-            mgp::List costs(cycle.costs.size()); // accumulated cost at each node
-            for (auto cost : cycle.costs) {
-                costs.Append(mgp::Value(cost));
-            }
-
-            auto record = record_factory.NewRecord();
-            record.Insert(std::string(shortest_paths::kReturnNegativeCycle).c_str(), true);
-            record.Insert(std::string(shortest_paths::kReturnSourceNode).c_str(), cycle_source);
-            record.Insert(std::string(shortest_paths::kReturnTargetNode).c_str(), cycle_source);
-            record.Insert(std::string(shortest_paths::kReturnTotalCost).c_str(), cycle.total_cost);
-            record.Insert(std::string(shortest_paths::kReturnCosts).c_str(), costs);
-            record.Insert(std::string(shortest_paths::kReturnPath).c_str(), result_path);
-            return;
-        }
-
-        std::vector<uint64_t> targets;
-        if (target_nodes.Empty()) {
-            // If no targets specified, return paths to all reachable nodes
-            targets = pathfinder.reachable_nodes();
-        } else {
-            for (auto target_nodes_elem : target_nodes ) {
-                auto target_node = target_nodes_elem.ValueNode();
-                auto node_id = GetInnerNodeId(graph_view, target_node.Id().AsUint());
-                if (pathfinder.has_path_to(node_id)) {
-                    targets.push_back(node_id);
-                }
-            }
-        }
-
-        for (auto target_id : targets) {
-            auto target_mgid = GetMemgraphNodeId(graph_view, target_id);
-
-            auto path = pathfinder.path_to(target_id);
-            if (path.empty()) continue;
-
-            mgp::Node target_node = graph.GetNodeById(mgp::Id::FromUint(target_mgid));
-            mgp::Path result_path = TranslatePath(graph, graph_view, path);
-            mgp::List costs(path.costs.size()); // accumulated cost at each node
-            for (auto cost : path.costs) {
-                costs.Append(mgp::Value(cost));
-            }
-
-            auto record = record_factory.NewRecord();
-            record.Insert(std::string(shortest_paths::kReturnNegativeCycle).c_str(), false);
-            record.Insert(std::string(shortest_paths::kReturnSourceNode).c_str(), source_node);
-            record.Insert(std::string(shortest_paths::kReturnTargetNode).c_str(), target_node);
-            record.Insert(std::string(shortest_paths::kReturnTotalCost).c_str(), path.total_cost);
-            record.Insert(std::string(shortest_paths::kReturnCosts).c_str(), costs);
-            record.Insert(std::string(shortest_paths::kReturnPath).c_str(), result_path);
-        }
-    } catch (const std::exception& e) {
-        record_factory.SetErrorMessage(e.what());
-        return;
+    const auto source_mgid = source_node.Id().AsUint();
+    const auto maybe_source_id = GetInnerNodeIdOpt(graph_view, source_mgid);
+    if (!maybe_source_id) {
+      // Source is not in subgraph, so there can be no paths from it.
+      return;
     }
+    const auto source_id = maybe_source_id.value();
+
+    shortest_paths::BellmanFordPathfinder<uint64_t> pathfinder(graph_view, source_id);
+    if (pathfinder.has_negative_cycle()) {
+      auto cycle = pathfinder.negative_cycle().value();
+      mgp::Path result_path = TranslatePath(graph, graph_view, cycle);
+      mgp::Node cycle_source = result_path.GetNodeAt(0);
+      mgp::List costs(cycle.costs.size());  // accumulated cost at each node
+      for (auto cost : cycle.costs) {
+        costs.Append(mgp::Value(cost));
+      }
+
+      auto record = record_factory.NewRecord();
+      record.Insert(std::string(shortest_paths::kReturnNegativeCycle).c_str(), true);
+      record.Insert(std::string(shortest_paths::kReturnSourceNode).c_str(), cycle_source);
+      record.Insert(std::string(shortest_paths::kReturnTargetNode).c_str(), cycle_source);
+      record.Insert(std::string(shortest_paths::kReturnTotalCost).c_str(), cycle.total_cost);
+      record.Insert(std::string(shortest_paths::kReturnCosts).c_str(), costs);
+      record.Insert(std::string(shortest_paths::kReturnPath).c_str(), result_path);
+      return;
+    }
+
+    std::vector<uint64_t> targets;
+    if (target_nodes.Empty()) {
+      // If no targets specified, return paths to all reachable nodes
+      targets = pathfinder.reachable_nodes();
+    } else {
+      for (auto target_nodes_elem : target_nodes) {
+        auto target_node = target_nodes_elem.ValueNode();
+        auto node_id = GetInnerNodeId(graph_view, target_node.Id().AsUint());
+        if (pathfinder.has_path_to(node_id)) {
+          targets.push_back(node_id);
+        }
+      }
+    }
+
+    for (auto target_id : targets) {
+      auto target_mgid = GetMemgraphNodeId(graph_view, target_id);
+
+      auto path = pathfinder.path_to(target_id);
+      if (path.empty()) continue;
+
+      mgp::Node target_node = graph.GetNodeById(mgp::Id::FromUint(target_mgid));
+      mgp::Path result_path = TranslatePath(graph, graph_view, path);
+      mgp::List costs(path.costs.size());  // accumulated cost at each node
+      for (auto cost : path.costs) {
+        costs.Append(mgp::Value(cost));
+      }
+
+      auto record = record_factory.NewRecord();
+      record.Insert(std::string(shortest_paths::kReturnNegativeCycle).c_str(), false);
+      record.Insert(std::string(shortest_paths::kReturnSourceNode).c_str(), source_node);
+      record.Insert(std::string(shortest_paths::kReturnTargetNode).c_str(), target_node);
+      record.Insert(std::string(shortest_paths::kReturnTotalCost).c_str(), path.total_cost);
+      record.Insert(std::string(shortest_paths::kReturnCosts).c_str(), costs);
+      record.Insert(std::string(shortest_paths::kReturnPath).c_str(), result_path);
+    }
+  } catch (const std::exception &e) {
+    record_factory.SetErrorMessage(e.what());
+    return;
+  }
 }
 
 void IterativeBellmanFordProcedure(mgp_list *args, mgp_graph *memgraph_graph, mgp_result *result, mgp_memory *memory) {
-    // Indicies in the arguments list for parameters
-    enum ArgIdx : size_t {
-        Source, Target, WeightProp, ScoreProp, DefaultWeight, DefaultScore, CullAscending
-    };
+  // Indicies in the arguments list for parameters
+  enum ArgIdx : size_t { Source, Target, WeightProp, ScoreProp, DefaultWeight, DefaultScore, CullAscending };
 
-    mgp::MemoryDispatcherGuard mem_guard(memory);
-    mgp::Graph graph{memgraph_graph};
+  mgp::MemoryDispatcherGuard mem_guard(memory);
+  mgp::Graph graph{memgraph_graph};
 
-    const auto arguments = mgp::List(args);
-    const auto record_factory = mgp::RecordFactory(result);
-    try {
-        const auto source_node = arguments[ArgIdx::Source].ValueNode();
-        const auto target_node = arguments[ArgIdx::Target].ValueNode();
-        const auto weight_property = std::string(arguments[ArgIdx::WeightProp].ValueString());
-        const auto score_property = std::string(arguments[ArgIdx::ScoreProp].ValueString());
-        double default_weight = arguments[ArgIdx::DefaultWeight].ValueDouble();
-        double default_score = arguments[ArgIdx::DefaultScore].ValueDouble();
-        bool cull_ascending = arguments[ArgIdx::CullAscending].ValueBool();
+  const auto arguments = mgp::List(args);
+  const auto record_factory = mgp::RecordFactory(result);
+  try {
+    const auto source_node = arguments[ArgIdx::Source].ValueNode();
+    const auto target_node = arguments[ArgIdx::Target].ValueNode();
+    const auto weight_property = std::string(arguments[ArgIdx::WeightProp].ValueString());
+    const auto score_property = std::string(arguments[ArgIdx::ScoreProp].ValueString());
+    double default_weight = arguments[ArgIdx::DefaultWeight].ValueDouble();
+    double default_score = arguments[ArgIdx::DefaultScore].ValueDouble();
+    bool cull_ascending = arguments[ArgIdx::CullAscending].ValueBool();
 
-        bool weighted = ! weight_property.empty();
-        const char * weight_prop_cstr = weighted ? weight_property.c_str() : nullptr;
+    bool weighted = !weight_property.empty();
+    const char *weight_prop_cstr = weighted ? weight_property.c_str() : nullptr;
 
-        auto graph_view_ptr = mg_utility::GetGraphView(
-            memgraph_graph, result, memory, mg_graph::GraphType::kDirectedGraph,
-            weighted, weight_prop_cstr, default_weight
-        );
-        const mg_graph::GraphView<>& graph_view = *graph_view_ptr;
+    auto graph_view_ptr = mg_utility::GetGraphView(memgraph_graph, result, memory, mg_graph::GraphType::kDirectedGraph,
+                                                   weighted, weight_prop_cstr, default_weight);
+    const mg_graph::GraphView<> &graph_view = *graph_view_ptr;
 
-        std::vector<double> scores = GetScores(graph, graph_view, score_property, default_score);
+    std::vector<double> scores = GetScores(graph, graph_view, score_property, default_score);
 
-
-        const auto source_mgid = source_node.Id().AsUint();
-        const auto target_mgid = target_node.Id().AsUint();
-        const auto maybe_source_id = GetInnerNodeIdOpt(graph_view, source_mgid);
-        const auto maybe_target_id = GetInnerNodeIdOpt(graph_view, target_mgid);
-        if (!maybe_source_id || !maybe_target_id) {
-            // Either source or target is not in subgraph, so there can be no paths between them.
-            return;
-        }
-        const auto source_id = maybe_source_id.value();
-        const auto target_id = maybe_target_id.value();
-        auto abort_func = [&graph] () { graph.CheckMustAbort(); };
-
-        shortest_paths::IterativeBellmanFordPathfinder<uint64_t> pathfinder(scores, cull_ascending);
-        auto path = pathfinder.search(graph_view, source_id, target_id, {}, {}, abort_func);
-        if (path.empty()) {
-            return;
-        }
-
-        mgp::Path result_path = TranslatePath(graph, graph_view, path);
-        mgp::List costs(path.costs.size()); // accumulated cost at each node
-        for (auto cost : path.costs) {
-            costs.Append(mgp::Value(cost));
-        }
-
-        auto record = record_factory.NewRecord();
-        record.Insert(std::string(shortest_paths::kReturnSourceNode).c_str(), source_node);
-        record.Insert(std::string(shortest_paths::kReturnTargetNode).c_str(), target_node);
-        record.Insert(std::string(shortest_paths::kReturnTotalCost).c_str(), path.total_cost);
-        record.Insert(std::string(shortest_paths::kReturnCosts).c_str(), costs);
-        record.Insert(
-            std::string(shortest_paths::kReturnNumEdgesRemoved).c_str(),
-            static_cast<int64_t>(pathfinder.num_edges_removed())
-        );
-        record.Insert(std::string(shortest_paths::kReturnPath).c_str(), result_path);
-    } catch (const std::exception& e) {
-        record_factory.SetErrorMessage(e.what());
-        return;
+    const auto source_mgid = source_node.Id().AsUint();
+    const auto target_mgid = target_node.Id().AsUint();
+    const auto maybe_source_id = GetInnerNodeIdOpt(graph_view, source_mgid);
+    const auto maybe_target_id = GetInnerNodeIdOpt(graph_view, target_mgid);
+    if (!maybe_source_id || !maybe_target_id) {
+      // Either source or target is not in subgraph, so there can be no paths between them.
+      return;
     }
+    const auto source_id = maybe_source_id.value();
+    const auto target_id = maybe_target_id.value();
+    auto abort_func = [&graph]() { graph.CheckMustAbort(); };
+
+    shortest_paths::IterativeBellmanFordPathfinder<uint64_t> pathfinder(scores, cull_ascending);
+    auto path = pathfinder.search(graph_view, source_id, target_id, {}, {}, abort_func);
+    if (path.empty()) {
+      return;
+    }
+
+    mgp::Path result_path = TranslatePath(graph, graph_view, path);
+    mgp::List costs(path.costs.size());  // accumulated cost at each node
+    for (auto cost : path.costs) {
+      costs.Append(mgp::Value(cost));
+    }
+
+    auto record = record_factory.NewRecord();
+    record.Insert(std::string(shortest_paths::kReturnSourceNode).c_str(), source_node);
+    record.Insert(std::string(shortest_paths::kReturnTargetNode).c_str(), target_node);
+    record.Insert(std::string(shortest_paths::kReturnTotalCost).c_str(), path.total_cost);
+    record.Insert(std::string(shortest_paths::kReturnCosts).c_str(), costs);
+    record.Insert(std::string(shortest_paths::kReturnNumEdgesRemoved).c_str(),
+                  static_cast<int64_t>(pathfinder.num_edges_removed()));
+    record.Insert(std::string(shortest_paths::kReturnPath).c_str(), result_path);
+  } catch (const std::exception &e) {
+    record_factory.SetErrorMessage(e.what());
+    return;
+  }
 }
 
 void IBF_SSSP(mgp_list *args, mgp_graph *memgraph_graph, mgp_result *result, mgp_memory *memory) {
-    // Indicies in the arguments list for parameters
-    enum ArgIdx : size_t {
-        Source, Targets, WeightProp, ScoreProp, DefaultWeight, DefaultScore, CullAscending
-    };
-    mgp::MemoryDispatcherGuard mem_guard(memory);
-    mgp::Graph graph{memgraph_graph};
+  // Indicies in the arguments list for parameters
+  enum ArgIdx : size_t { Source, Targets, WeightProp, ScoreProp, DefaultWeight, DefaultScore, CullAscending };
+  mgp::MemoryDispatcherGuard mem_guard(memory);
+  mgp::Graph graph{memgraph_graph};
 
-    const auto arguments = mgp::List(args);
-    const auto record_factory = mgp::RecordFactory(result);
-    try {
-        const auto source_node = arguments[ArgIdx::Source].ValueNode();
-        const auto target_nodes = arguments[ArgIdx::Targets].ValueList();
-        const auto weight_property = std::string(arguments[ArgIdx::WeightProp].ValueString());
-        const auto score_property = std::string(arguments[ArgIdx::ScoreProp].ValueString());
-        double default_weight = arguments[ArgIdx::DefaultWeight].ValueDouble();
-        double default_score = arguments[ArgIdx::DefaultScore].ValueDouble();
-        bool cull_ascending = arguments[ArgIdx::CullAscending].ValueBool();
+  const auto arguments = mgp::List(args);
+  const auto record_factory = mgp::RecordFactory(result);
+  try {
+    const auto source_node = arguments[ArgIdx::Source].ValueNode();
+    const auto target_nodes = arguments[ArgIdx::Targets].ValueList();
+    const auto weight_property = std::string(arguments[ArgIdx::WeightProp].ValueString());
+    const auto score_property = std::string(arguments[ArgIdx::ScoreProp].ValueString());
+    double default_weight = arguments[ArgIdx::DefaultWeight].ValueDouble();
+    double default_score = arguments[ArgIdx::DefaultScore].ValueDouble();
+    bool cull_ascending = arguments[ArgIdx::CullAscending].ValueBool();
 
-        bool weighted = ! weight_property.empty();
-        const char * weight_prop_cstr = weighted ? weight_property.c_str() : nullptr;
+    bool weighted = !weight_property.empty();
+    const char *weight_prop_cstr = weighted ? weight_property.c_str() : nullptr;
 
-        auto graph_view_ptr = mg_utility::GetGraphView(
-            memgraph_graph, result, memory, mg_graph::GraphType::kDirectedGraph,
-            weighted, weight_prop_cstr, default_weight
-        );
-        const mg_graph::GraphView<>& graph_view = *graph_view_ptr;
+    auto graph_view_ptr = mg_utility::GetGraphView(memgraph_graph, result, memory, mg_graph::GraphType::kDirectedGraph,
+                                                   weighted, weight_prop_cstr, default_weight);
+    const mg_graph::GraphView<> &graph_view = *graph_view_ptr;
 
-        std::vector<double> scores = GetScores(graph, graph_view, score_property, default_score);
+    std::vector<double> scores = GetScores(graph, graph_view, score_property, default_score);
 
-        const auto source_mgid = source_node.Id().AsUint();
-        const auto maybe_source_id = GetInnerNodeIdOpt(graph_view, source_mgid);
-        if (!maybe_source_id) {
-            // Source is not in subgraph, so there can be no paths from it.
-            return;
-        }
-        const auto source_id = maybe_source_id.value();
-        auto abort_func = [&graph] () { graph.CheckMustAbort(); };
-
-        shortest_paths::IterativeBellmanFordPathfinder<uint64_t> pathfinder(scores, cull_ascending);
-        pathfinder.remove_cycles(graph_view, source_id, {}, {}, abort_func);
-
-        std::vector<uint64_t> targets;
-        if (target_nodes.Empty()) {
-            targets = pathfinder.reachable_nodes();
-        } else {
-            for (auto target_nodes_elem : target_nodes) {
-                auto target_node = target_nodes_elem.ValueNode();
-                auto node_id = GetInnerNodeId(graph_view, target_node.Id().AsUint());
-                if (pathfinder.has_path_to(node_id)) {
-                    targets.push_back(node_id);
-                }
-            }
-        }
-
-        for (auto target_id : targets) {
-            if (target_id == source_id) continue;
-
-            auto target_mgid = GetMemgraphNodeId(graph_view, target_id);
-
-            auto path = pathfinder.path_to(target_id);
-            if (path.empty()) continue;
-
-            mgp::Node target_node = graph.GetNodeById(mgp::Id::FromUint(target_mgid));
-            mgp::Path result_path = TranslatePath(graph, graph_view, path);
-            mgp::List costs(path.costs.size()); // accumulated cost at each node
-            for (auto cost : path.costs) {
-                costs.Append(mgp::Value(cost));
-            }
-
-            auto record = record_factory.NewRecord();
-            record.Insert(std::string(shortest_paths::kReturnSourceNode).c_str(), source_node);
-            record.Insert(std::string(shortest_paths::kReturnTargetNode).c_str(), target_node);
-            record.Insert(std::string(shortest_paths::kReturnTotalCost).c_str(), path.total_cost);
-            record.Insert(std::string(shortest_paths::kReturnCosts).c_str(), costs);
-            record.Insert(std::string(shortest_paths::kReturnPath).c_str(), result_path);
-        }
-    } catch (const std::exception& e) {
-        record_factory.SetErrorMessage(e.what());
-        return;
+    const auto source_mgid = source_node.Id().AsUint();
+    const auto maybe_source_id = GetInnerNodeIdOpt(graph_view, source_mgid);
+    if (!maybe_source_id) {
+      // Source is not in subgraph, so there can be no paths from it.
+      return;
     }
+    const auto source_id = maybe_source_id.value();
+    auto abort_func = [&graph]() { graph.CheckMustAbort(); };
+
+    shortest_paths::IterativeBellmanFordPathfinder<uint64_t> pathfinder(scores, cull_ascending);
+    pathfinder.remove_cycles(graph_view, source_id, {}, {}, abort_func);
+
+    std::vector<uint64_t> targets;
+    if (target_nodes.Empty()) {
+      targets = pathfinder.reachable_nodes();
+    } else {
+      for (auto target_nodes_elem : target_nodes) {
+        auto target_node = target_nodes_elem.ValueNode();
+        auto node_id = GetInnerNodeId(graph_view, target_node.Id().AsUint());
+        if (pathfinder.has_path_to(node_id)) {
+          targets.push_back(node_id);
+        }
+      }
+    }
+
+    for (auto target_id : targets) {
+      if (target_id == source_id) continue;
+
+      auto target_mgid = GetMemgraphNodeId(graph_view, target_id);
+
+      auto path = pathfinder.path_to(target_id);
+      if (path.empty()) continue;
+
+      mgp::Node target_node = graph.GetNodeById(mgp::Id::FromUint(target_mgid));
+      mgp::Path result_path = TranslatePath(graph, graph_view, path);
+      mgp::List costs(path.costs.size());  // accumulated cost at each node
+      for (auto cost : path.costs) {
+        costs.Append(mgp::Value(cost));
+      }
+
+      auto record = record_factory.NewRecord();
+      record.Insert(std::string(shortest_paths::kReturnSourceNode).c_str(), source_node);
+      record.Insert(std::string(shortest_paths::kReturnTargetNode).c_str(), target_node);
+      record.Insert(std::string(shortest_paths::kReturnTotalCost).c_str(), path.total_cost);
+      record.Insert(std::string(shortest_paths::kReturnCosts).c_str(), costs);
+      record.Insert(std::string(shortest_paths::kReturnPath).c_str(), result_path);
+    }
+  } catch (const std::exception &e) {
+    record_factory.SetErrorMessage(e.what());
+    return;
+  }
 }
 
-
 void IBF_SSSP_Subgraph(mgp_list *args, mgp_graph *memgraph_graph, mgp_result *result, mgp_memory *memory) {
-    // Indicies in the arguments list for parameters
-    enum ArgIdx : size_t {
-        Source, WeightProp, ScoreProp, DefaultWeight, DefaultScore, CullAscending
-    };
-    mgp::MemoryDispatcherGuard mem_guard(memory);
-    mgp::Graph graph{memgraph_graph};
+  // Indicies in the arguments list for parameters
+  enum ArgIdx : size_t { Source, WeightProp, ScoreProp, DefaultWeight, DefaultScore, CullAscending };
+  mgp::MemoryDispatcherGuard mem_guard(memory);
+  mgp::Graph graph{memgraph_graph};
 
-    const auto arguments = mgp::List(args);
-    const auto record_factory = mgp::RecordFactory(result);
-    try {
-        const auto source_node = arguments[ArgIdx::Source].ValueNode();
-        const auto weight_property = std::string(arguments[ArgIdx::WeightProp].ValueString());
-        const auto score_property = std::string(arguments[ArgIdx::ScoreProp].ValueString());
-        double default_weight = arguments[ArgIdx::DefaultWeight].ValueDouble();
-        double default_score = arguments[ArgIdx::DefaultScore].ValueDouble();
-        bool cull_ascending = arguments[ArgIdx::CullAscending].ValueBool();
+  const auto arguments = mgp::List(args);
+  const auto record_factory = mgp::RecordFactory(result);
+  try {
+    const auto source_node = arguments[ArgIdx::Source].ValueNode();
+    const auto weight_property = std::string(arguments[ArgIdx::WeightProp].ValueString());
+    const auto score_property = std::string(arguments[ArgIdx::ScoreProp].ValueString());
+    double default_weight = arguments[ArgIdx::DefaultWeight].ValueDouble();
+    double default_score = arguments[ArgIdx::DefaultScore].ValueDouble();
+    bool cull_ascending = arguments[ArgIdx::CullAscending].ValueBool();
 
-        bool weighted = ! weight_property.empty();
-        const char * weight_prop_cstr = weighted ? weight_property.c_str() : nullptr;
+    bool weighted = !weight_property.empty();
+    const char *weight_prop_cstr = weighted ? weight_property.c_str() : nullptr;
 
-        auto graph_view_ptr = mg_utility::GetGraphView(
-            memgraph_graph, result, memory, mg_graph::GraphType::kDirectedGraph,
-            weighted, weight_prop_cstr, default_weight
-        );
-        const mg_graph::GraphView<>& graph_view = *graph_view_ptr;
+    auto graph_view_ptr = mg_utility::GetGraphView(memgraph_graph, result, memory, mg_graph::GraphType::kDirectedGraph,
+                                                   weighted, weight_prop_cstr, default_weight);
+    const mg_graph::GraphView<> &graph_view = *graph_view_ptr;
 
-        std::vector<double> scores = GetScores(graph, graph_view, score_property, default_score);
+    std::vector<double> scores = GetScores(graph, graph_view, score_property, default_score);
 
-        const auto source_mgid = source_node.Id().AsUint();
-        const auto maybe_source_id = GetInnerNodeIdOpt(graph_view, source_mgid);
-        if (!maybe_source_id) {
-            // Source not in (sub)graph, so resulting subgraph is empty.
-            auto record = record_factory.NewRecord();
-            record.Insert(std::string(shortest_paths::kReturnNodes).c_str(), mgp::List());
-            record.Insert(std::string(shortest_paths::kReturnEdges).c_str(), mgp::List());
-            record.Insert(std::string(shortest_paths::kReturnNumEdgesRemoved).c_str(), 0L);
-            record.Insert(std::string(shortest_paths::kReturnRemovedEdges).c_str(), mgp::List());
-            return;
-        }
-
-        const auto source_id = maybe_source_id.value();
-        auto abort_func = [&graph] () { graph.CheckMustAbort(); };
-
-        shortest_paths::IterativeBellmanFordPathfinder<uint64_t> pathfinder(scores, cull_ascending);
-        pathfinder.remove_cycles(graph_view, source_id, {}, {}, abort_func);
-
-        // Add all reachable nodes to result set
-        const auto reachable_node_ids = pathfinder.reachable_nodes();
-        mgp::List result_nodes(reachable_node_ids.size());
-        for (auto node_id : reachable_node_ids) {
-            auto mgid = mgp::Id::FromUint(GetMemgraphNodeId(graph_view, node_id));
-            result_nodes.Append(mgp::Value(graph.GetNodeById(mgid)));
-        }
-
-        // Set up sets of memgraph IDs for included and removed edges, so we can more easily check for inclusion
-        // in either set while iterating over the edges.
-        auto edge_ids_used = pathfinder.edges_used();
-        auto removed_edge_ids = pathfinder.removed_edges();
-        std::unordered_set<uint64_t> edges_used_mgid_set;
-        std::unordered_set<uint64_t> removed_edges_mgid_set;
-        edges_used_mgid_set.reserve(edge_ids_used.size());
-        removed_edges_mgid_set.reserve(removed_edge_ids.size());
-
-        for (auto edge_id : edge_ids_used) {
-            edges_used_mgid_set.emplace(GetMemgraphEdgeId(graph_view, edge_id));
-        }
-        for (auto edge_id : removed_edge_ids) {
-            removed_edges_mgid_set.emplace(GetMemgraphEdgeId(graph_view, edge_id));
-        }
-
-        mgp::List result_edges(edges_used_mgid_set.size());
-        mgp::List result_removed_edges(removed_edges_mgid_set.size());
-
-        for (const auto& edge : graph.Relationships()) {
-            auto edge_mgid = edge.Id().AsUint();
-            if (edges_used_mgid_set.contains(edge_mgid)) {
-                result_edges.Append(mgp::Value(edge));
-            } else if (removed_edges_mgid_set.contains(edge_mgid)) {
-                result_removed_edges.Append(mgp::Value(edge));
-            }
-        }
-
-        auto record = record_factory.NewRecord();
-        record.Insert(std::string(shortest_paths::kReturnNodes).c_str(), result_nodes);
-        record.Insert(std::string(shortest_paths::kReturnEdges).c_str(), result_edges);
-        record.Insert(std::string(shortest_paths::kReturnNumEdgesRemoved).c_str(), static_cast<int64_t>(removed_edges_mgid_set.size()));
-        record.Insert(std::string(shortest_paths::kReturnRemovedEdges).c_str(), result_removed_edges);
-    } catch (const std::exception& e) {
-        record_factory.SetErrorMessage(e.what());
-        return;
+    const auto source_mgid = source_node.Id().AsUint();
+    const auto maybe_source_id = GetInnerNodeIdOpt(graph_view, source_mgid);
+    if (!maybe_source_id) {
+      // Source not in (sub)graph, so resulting subgraph is empty.
+      auto record = record_factory.NewRecord();
+      record.Insert(std::string(shortest_paths::kReturnNodes).c_str(), mgp::List());
+      record.Insert(std::string(shortest_paths::kReturnEdges).c_str(), mgp::List());
+      record.Insert(std::string(shortest_paths::kReturnNumEdgesRemoved).c_str(), 0L);
+      record.Insert(std::string(shortest_paths::kReturnRemovedEdges).c_str(), mgp::List());
+      return;
     }
+
+    const auto source_id = maybe_source_id.value();
+    auto abort_func = [&graph]() { graph.CheckMustAbort(); };
+
+    shortest_paths::IterativeBellmanFordPathfinder<uint64_t> pathfinder(scores, cull_ascending);
+    pathfinder.remove_cycles(graph_view, source_id, {}, {}, abort_func);
+
+    // Add all reachable nodes to result set
+    const auto reachable_node_ids = pathfinder.reachable_nodes();
+    mgp::List result_nodes(reachable_node_ids.size());
+    for (auto node_id : reachable_node_ids) {
+      auto mgid = mgp::Id::FromUint(GetMemgraphNodeId(graph_view, node_id));
+      result_nodes.Append(mgp::Value(graph.GetNodeById(mgid)));
+    }
+
+    // Set up sets of memgraph IDs for included and removed edges, so we can more easily check for inclusion
+    // in either set while iterating over the edges.
+    auto edge_ids_used = pathfinder.edges_used();
+    auto removed_edge_ids = pathfinder.removed_edges();
+    std::unordered_set<uint64_t> edges_used_mgid_set;
+    std::unordered_set<uint64_t> removed_edges_mgid_set;
+    edges_used_mgid_set.reserve(edge_ids_used.size());
+    removed_edges_mgid_set.reserve(removed_edge_ids.size());
+
+    for (auto edge_id : edge_ids_used) {
+      edges_used_mgid_set.emplace(GetMemgraphEdgeId(graph_view, edge_id));
+    }
+    for (auto edge_id : removed_edge_ids) {
+      removed_edges_mgid_set.emplace(GetMemgraphEdgeId(graph_view, edge_id));
+    }
+
+    mgp::List result_edges(edges_used_mgid_set.size());
+    mgp::List result_removed_edges(removed_edges_mgid_set.size());
+
+    for (const auto &edge : graph.Relationships()) {
+      auto edge_mgid = edge.Id().AsUint();
+      if (edges_used_mgid_set.contains(edge_mgid)) {
+        result_edges.Append(mgp::Value(edge));
+      } else if (removed_edges_mgid_set.contains(edge_mgid)) {
+        result_removed_edges.Append(mgp::Value(edge));
+      }
+    }
+
+    auto record = record_factory.NewRecord();
+    record.Insert(std::string(shortest_paths::kReturnNodes).c_str(), result_nodes);
+    record.Insert(std::string(shortest_paths::kReturnEdges).c_str(), result_edges);
+    record.Insert(std::string(shortest_paths::kReturnNumEdgesRemoved).c_str(),
+                  static_cast<int64_t>(removed_edges_mgid_set.size()));
+    record.Insert(std::string(shortest_paths::kReturnRemovedEdges).c_str(), result_removed_edges);
+  } catch (const std::exception &e) {
+    record_factory.SetErrorMessage(e.what());
+    return;
+  }
 }
 
 void Johnsons_Subgraph(mgp_list *args, mgp_graph *memgraph_graph, mgp_result *result, mgp_memory *memory) {
-    // Indicies in the arguments list for parameters
-    enum ArgIdx : size_t {
-        WeightProp, ScoreProp, DefaultWeight, DefaultScore, CullAscending, Threads
-    };
-    mgp::MemoryDispatcherGuard mem_guard(memory);
-    mgp::Graph graph{memgraph_graph};
+  // Indicies in the arguments list for parameters
+  enum ArgIdx : size_t { WeightProp, ScoreProp, DefaultWeight, DefaultScore, CullAscending, Threads };
+  mgp::MemoryDispatcherGuard mem_guard(memory);
+  mgp::Graph graph{memgraph_graph};
 
-    const auto arguments = mgp::List(args);
-    const auto record_factory = mgp::RecordFactory(result);
-    try {
-        const auto weight_property = std::string(arguments[ArgIdx::WeightProp].ValueString());
-        const auto score_property = std::string(arguments[ArgIdx::ScoreProp].ValueString());
-        double default_weight = arguments[ArgIdx::DefaultWeight].ValueDouble();
-        double default_score = arguments[ArgIdx::DefaultScore].ValueDouble();
-        bool cull_ascending = arguments[ArgIdx::CullAscending].ValueBool();
-        int threads = arguments[ArgIdx::Threads].ValueInt();
+  const auto arguments = mgp::List(args);
+  const auto record_factory = mgp::RecordFactory(result);
+  try {
+    const auto weight_property = std::string(arguments[ArgIdx::WeightProp].ValueString());
+    const auto score_property = std::string(arguments[ArgIdx::ScoreProp].ValueString());
+    double default_weight = arguments[ArgIdx::DefaultWeight].ValueDouble();
+    double default_score = arguments[ArgIdx::DefaultScore].ValueDouble();
+    bool cull_ascending = arguments[ArgIdx::CullAscending].ValueBool();
+    int threads = arguments[ArgIdx::Threads].ValueInt();
 
-        bool weighted = ! weight_property.empty();
-        const char * weight_prop_cstr = weighted ? weight_property.c_str() : nullptr;
+    bool weighted = !weight_property.empty();
+    const char *weight_prop_cstr = weighted ? weight_property.c_str() : nullptr;
 
-        auto graph_view_ptr = mg_utility::GetGraphView(
-            memgraph_graph, result, memory, mg_graph::GraphType::kDirectedGraph,
-            weighted, weight_prop_cstr, default_weight
-        );
-        const mg_graph::GraphView<>& graph_view = *graph_view_ptr;
+    auto graph_view_ptr = mg_utility::GetGraphView(memgraph_graph, result, memory, mg_graph::GraphType::kDirectedGraph,
+                                                   weighted, weight_prop_cstr, default_weight);
+    const mg_graph::GraphView<> &graph_view = *graph_view_ptr;
 
-        auto abort_func = [&graph] () { graph.CheckMustAbort(); };
+    auto abort_func = [&graph]() { graph.CheckMustAbort(); };
 
-        shortest_paths::JohnsonsPathfinder<> pathfinder;
-        if (!score_property.empty()) {
-            std::vector<double> scores = GetScores(graph, graph_view, score_property, default_score);
-            pathfinder.search_all_remove_cycles(graph_view, scores, cull_ascending, abort_func, threads);
-        } else {
-            pathfinder.search_all(graph_view, abort_func, threads);
-        }
-
-        if (pathfinder.has_negative_cycle()) {
-            auto cycle = pathfinder.negative_cycle().value();
-            mgp::List nodes(cycle.nodes.size());
-            mgp::List edges(cycle.edges.size());
-            // Empty list return parameters
-            mgp::List removed_edges;
-            mgp::List edge_weights;
-
-            mgp::Path result_path = TranslatePath(graph, graph_view, cycle);
-            mgp::Node cycle_source = result_path.GetNodeAt(0);
-            mgp::List costs(cycle.costs.size()); // accumulated cost at each node
-            for (auto cost : cycle.costs) {
-                costs.Append(mgp::Value(cost));
-            }
-            nodes.Append(mgp::Value(cycle_source));
-            for (size_t edge_index = 0; edge_index < cycle.size(); edge_index++) {
-                edges.Append(mgp::Value(result_path.GetRelationshipAt(edge_index)));
-                nodes.Append(mgp::Value(result_path.GetNodeAt(edge_index+1)));
-            }
-
-            auto record = record_factory.NewRecord();
-            record.Insert(std::string(shortest_paths::kReturnNegativeCycle).c_str(), true);
-            record.Insert(std::string(shortest_paths::kReturnNodes).c_str(), nodes);
-            record.Insert(std::string(shortest_paths::kReturnEdges).c_str(), edges);
-            record.Insert(std::string(shortest_paths::kReturnNodeWeights).c_str(), costs);
-            record.Insert(std::string(shortest_paths::kReturnEdgeWeights).c_str(), edge_weights);
-            record.Insert(std::string(shortest_paths::kReturnNumEdgesRemoved).c_str(), 0L);
-            record.Insert(std::string(shortest_paths::kReturnRemovedEdges).c_str(), removed_edges);
-            return;
-        }
-
-        // List of nodes in same order as view, so the edge weights match.
-        mgp::List nodes(graph_view.Nodes().size());
-        for (const auto& node : graph_view.Nodes()) {
-            auto node_id = mgp::Id::FromUint(GetMemgraphNodeId(graph_view, node.id));
-            nodes.Append(mgp::Value(graph.GetNodeById(node_id)));
-        }
-        auto node_weights = ToList(pathfinder.node_weights());
-        const auto& inner_edge_weights = pathfinder.edge_weights();
-        std::unordered_map<uint64_t, double> mgid_to_edge_weight;
-
-        int64_t num_edges_removed = static_cast<int64_t>(pathfinder.num_edges_removed());
-
-        std::vector<bool> checked_edges(graph_view.Edges().size(), false);
-        std::unordered_set<uint64_t> edges_used_mgid_set;
-        std::unordered_set<uint64_t> removed_edges_mgid_set;
-        removed_edges_mgid_set.reserve(pathfinder.num_edges_removed());
-
-        // Build set of edges used by any shortest path
-        for (uint64_t source_id = 0; source_id < graph_view.Nodes().size(); source_id++) {
-            for (auto edge_id : pathfinder.edges_used_from(source_id)) {
-                if (checked_edges[edge_id]) {
-                    continue;
-                }
-                checked_edges[edge_id] = true;
-                auto mgid = GetMemgraphEdgeId(graph_view, edge_id);
-                edges_used_mgid_set.emplace(mgid);
-                mgid_to_edge_weight[mgid] = inner_edge_weights[edge_id];
-            }
-        }
-        for (auto edge_id : pathfinder.removed_edges()) {
-            removed_edges_mgid_set.emplace(GetMemgraphEdgeId(graph_view, edge_id));
-        }
-
-        mgp::List edges(edges_used_mgid_set.size());
-        mgp::List edge_weights(edges_used_mgid_set.size());
-        mgp::List removed_edges(removed_edges_mgid_set.size());
-        for (const auto& edge : graph.Relationships()) {
-            auto edge_mgid = edge.Id().AsUint();
-            if (edges_used_mgid_set.contains(edge_mgid)) {
-                edges.Append(mgp::Value(edge));
-                edge_weights.Append(mgp::Value(mgid_to_edge_weight[edge_mgid]));
-            } else if (removed_edges_mgid_set.contains(edge_mgid)) {
-                removed_edges.Append(mgp::Value(edge));
-            }
-        }
-
-        auto record = record_factory.NewRecord();
-        record.Insert(std::string(shortest_paths::kReturnNegativeCycle).c_str(), false);
-        record.Insert(std::string(shortest_paths::kReturnNodes).c_str(), nodes);
-        record.Insert(std::string(shortest_paths::kReturnEdges).c_str(), edges);
-        record.Insert(std::string(shortest_paths::kReturnNodeWeights).c_str(), node_weights);
-        record.Insert(std::string(shortest_paths::kReturnEdgeWeights).c_str(), edge_weights);
-        record.Insert(std::string(shortest_paths::kReturnNumEdgesRemoved).c_str(), num_edges_removed);
-        record.Insert(std::string(shortest_paths::kReturnRemovedEdges).c_str(), removed_edges);
-    } catch (const std::exception& e) {
-        record_factory.SetErrorMessage(e.what());
-        return;
+    shortest_paths::JohnsonsPathfinder<> pathfinder;
+    if (!score_property.empty()) {
+      std::vector<double> scores = GetScores(graph, graph_view, score_property, default_score);
+      pathfinder.search_all_remove_cycles(graph_view, scores, cull_ascending, abort_func, threads);
+    } else {
+      pathfinder.search_all(graph_view, abort_func, threads);
     }
+
+    if (pathfinder.has_negative_cycle()) {
+      auto cycle = pathfinder.negative_cycle().value();
+      mgp::List nodes(cycle.nodes.size());
+      mgp::List edges(cycle.edges.size());
+      // Empty list return parameters
+      mgp::List removed_edges;
+      mgp::List edge_weights;
+
+      mgp::Path result_path = TranslatePath(graph, graph_view, cycle);
+      mgp::Node cycle_source = result_path.GetNodeAt(0);
+      mgp::List costs(cycle.costs.size());  // accumulated cost at each node
+      for (auto cost : cycle.costs) {
+        costs.Append(mgp::Value(cost));
+      }
+      nodes.Append(mgp::Value(cycle_source));
+      for (size_t edge_index = 0; edge_index < cycle.size(); edge_index++) {
+        edges.Append(mgp::Value(result_path.GetRelationshipAt(edge_index)));
+        nodes.Append(mgp::Value(result_path.GetNodeAt(edge_index + 1)));
+      }
+
+      auto record = record_factory.NewRecord();
+      record.Insert(std::string(shortest_paths::kReturnNegativeCycle).c_str(), true);
+      record.Insert(std::string(shortest_paths::kReturnNodes).c_str(), nodes);
+      record.Insert(std::string(shortest_paths::kReturnEdges).c_str(), edges);
+      record.Insert(std::string(shortest_paths::kReturnNodeWeights).c_str(), costs);
+      record.Insert(std::string(shortest_paths::kReturnEdgeWeights).c_str(), edge_weights);
+      record.Insert(std::string(shortest_paths::kReturnNumEdgesRemoved).c_str(), 0L);
+      record.Insert(std::string(shortest_paths::kReturnRemovedEdges).c_str(), removed_edges);
+      return;
+    }
+
+    // List of nodes in same order as view, so the edge weights match.
+    mgp::List nodes(graph_view.Nodes().size());
+    for (const auto &node : graph_view.Nodes()) {
+      auto node_id = mgp::Id::FromUint(GetMemgraphNodeId(graph_view, node.id));
+      nodes.Append(mgp::Value(graph.GetNodeById(node_id)));
+    }
+    auto node_weights = ToList(pathfinder.node_weights());
+    const auto &inner_edge_weights = pathfinder.edge_weights();
+    std::unordered_map<uint64_t, double> mgid_to_edge_weight;
+
+    int64_t num_edges_removed = static_cast<int64_t>(pathfinder.num_edges_removed());
+
+    std::vector<bool> checked_edges(graph_view.Edges().size(), false);
+    std::unordered_set<uint64_t> edges_used_mgid_set;
+    std::unordered_set<uint64_t> removed_edges_mgid_set;
+    removed_edges_mgid_set.reserve(pathfinder.num_edges_removed());
+
+    // Build set of edges used by any shortest path
+    for (uint64_t source_id = 0; source_id < graph_view.Nodes().size(); source_id++) {
+      for (auto edge_id : pathfinder.edges_used_from(source_id)) {
+        if (checked_edges[edge_id]) {
+          continue;
+        }
+        checked_edges[edge_id] = true;
+        auto mgid = GetMemgraphEdgeId(graph_view, edge_id);
+        edges_used_mgid_set.emplace(mgid);
+        mgid_to_edge_weight[mgid] = inner_edge_weights[edge_id];
+      }
+    }
+    for (auto edge_id : pathfinder.removed_edges()) {
+      removed_edges_mgid_set.emplace(GetMemgraphEdgeId(graph_view, edge_id));
+    }
+
+    mgp::List edges(edges_used_mgid_set.size());
+    mgp::List edge_weights(edges_used_mgid_set.size());
+    mgp::List removed_edges(removed_edges_mgid_set.size());
+    for (const auto &edge : graph.Relationships()) {
+      auto edge_mgid = edge.Id().AsUint();
+      if (edges_used_mgid_set.contains(edge_mgid)) {
+        edges.Append(mgp::Value(edge));
+        edge_weights.Append(mgp::Value(mgid_to_edge_weight[edge_mgid]));
+      } else if (removed_edges_mgid_set.contains(edge_mgid)) {
+        removed_edges.Append(mgp::Value(edge));
+      }
+    }
+
+    auto record = record_factory.NewRecord();
+    record.Insert(std::string(shortest_paths::kReturnNegativeCycle).c_str(), false);
+    record.Insert(std::string(shortest_paths::kReturnNodes).c_str(), nodes);
+    record.Insert(std::string(shortest_paths::kReturnEdges).c_str(), edges);
+    record.Insert(std::string(shortest_paths::kReturnNodeWeights).c_str(), node_weights);
+    record.Insert(std::string(shortest_paths::kReturnEdgeWeights).c_str(), edge_weights);
+    record.Insert(std::string(shortest_paths::kReturnNumEdgesRemoved).c_str(), num_edges_removed);
+    record.Insert(std::string(shortest_paths::kReturnRemovedEdges).c_str(), removed_edges);
+  } catch (const std::exception &e) {
+    record_factory.SetErrorMessage(e.what());
+    return;
+  }
 }
 
 void Johnsons_Source_Subgraphs(mgp_list *args, mgp_graph *memgraph_graph, mgp_result *result, mgp_memory *memory) {
-    // Indicies in the arguments list for parameters
-    enum ArgIdx : size_t {
-        SourceNodes, WeightProp, ScoreProp, DefaultWeight, DefaultScore, CullAscending, Threads
-    };
-    mgp::MemoryDispatcherGuard mem_guard(memory);
-    mgp::Graph graph{memgraph_graph};
+  // Indicies in the arguments list for parameters
+  enum ArgIdx : size_t { SourceNodes, WeightProp, ScoreProp, DefaultWeight, DefaultScore, CullAscending, Threads };
+  mgp::MemoryDispatcherGuard mem_guard(memory);
+  mgp::Graph graph{memgraph_graph};
 
-    const auto arguments = mgp::List(args);
-    const auto record_factory = mgp::RecordFactory(result);
-    try {
-        auto source_nodes = arguments[ArgIdx::SourceNodes].ValueList();
-        const auto weight_property = std::string(arguments[ArgIdx::WeightProp].ValueString());
-        const auto score_property = std::string(arguments[ArgIdx::ScoreProp].ValueString());
-        double default_weight = arguments[ArgIdx::DefaultWeight].ValueDouble();
-        double default_score = arguments[ArgIdx::DefaultScore].ValueDouble();
-        bool cull_ascending = arguments[ArgIdx::CullAscending].ValueBool();
-        int threads = arguments[ArgIdx::Threads].ValueInt();
+  const auto arguments = mgp::List(args);
+  const auto record_factory = mgp::RecordFactory(result);
+  try {
+    auto source_nodes = arguments[ArgIdx::SourceNodes].ValueList();
+    const auto weight_property = std::string(arguments[ArgIdx::WeightProp].ValueString());
+    const auto score_property = std::string(arguments[ArgIdx::ScoreProp].ValueString());
+    double default_weight = arguments[ArgIdx::DefaultWeight].ValueDouble();
+    double default_score = arguments[ArgIdx::DefaultScore].ValueDouble();
+    bool cull_ascending = arguments[ArgIdx::CullAscending].ValueBool();
+    int threads = arguments[ArgIdx::Threads].ValueInt();
 
-        bool weighted = ! weight_property.empty();
-        const char * weight_prop_cstr = weighted ? weight_property.c_str() : nullptr;
+    bool weighted = !weight_property.empty();
+    const char *weight_prop_cstr = weighted ? weight_property.c_str() : nullptr;
 
-        auto graph_view_ptr = mg_utility::GetGraphView(
-            memgraph_graph, result, memory, mg_graph::GraphType::kDirectedGraph,
-            weighted, weight_prop_cstr, default_weight
-        );
-        const mg_graph::GraphView<>& graph_view = *graph_view_ptr;
+    auto graph_view_ptr = mg_utility::GetGraphView(memgraph_graph, result, memory, mg_graph::GraphType::kDirectedGraph,
+                                                   weighted, weight_prop_cstr, default_weight);
+    const mg_graph::GraphView<> &graph_view = *graph_view_ptr;
 
-        auto abort_func = [&graph] () { graph.CheckMustAbort(); };
+    auto abort_func = [&graph]() { graph.CheckMustAbort(); };
 
-        std::unordered_set<uint64_t> source_ids;
-        for (const auto& value : source_nodes) {
-            auto node = value.ValueNode();
-            auto source_id = GetInnerNodeIdOpt(graph_view, node.Id().AsUint());
-            // Ignore sources not in subgraph
-            if (source_id) {
-                source_ids.emplace(source_id.value());
-            }
-        }
-        // If no nodes specified, search all
-        if (source_ids.empty()) {
-            for (auto node : graph_view.Nodes()) {
-                source_ids.emplace(node.id);
-            }
-        }
-
-        shortest_paths::JohnsonsPathfinder<> pathfinder;
-        if (!score_property.empty()) {
-            std::vector<double> scores = GetScores(graph, graph_view, score_property, default_score);
-            pathfinder.search_some_remove_cycles(graph_view, source_ids, scores, cull_ascending, abort_func, threads);
-        } else {
-            pathfinder.search_some(graph_view, source_ids, abort_func, threads);
-        }
-
-        if (pathfinder.has_negative_cycle()) {
-            auto cycle = pathfinder.negative_cycle().value();
-            mgp::List nodes(cycle.nodes.size());
-            mgp::List edges(cycle.edges.size());
-
-            mgp::Path result_path = TranslatePath(graph, graph_view, cycle);
-            mgp::Node cycle_source = result_path.GetNodeAt(0);
-            auto costs = ToList(cycle.costs);
-
-            nodes.Append(mgp::Value(cycle_source));
-            for (size_t edge_index = 0; edge_index < cycle.size(); edge_index++) {
-                edges.Append(mgp::Value(result_path.GetRelationshipAt(edge_index)));
-                nodes.Append(mgp::Value(result_path.GetNodeAt(edge_index+1)));
-            }
-
-            auto record = record_factory.NewRecord();
-            record.Insert(std::string(shortest_paths::kReturnNegativeCycle).c_str(), true);
-            record.Insert(std::string(shortest_paths::kReturnSourceNode).c_str(), cycle_source);
-            record.Insert(std::string(shortest_paths::kReturnNodes).c_str(), nodes);
-            record.Insert(std::string(shortest_paths::kReturnEdges).c_str(), edges);
-            record.Insert(std::string(shortest_paths::kReturnCosts).c_str(), costs);
-            return;
-        }
-
-        for (auto source_id : source_ids) {
-            auto source_mgid = GetMemgraphNodeId(graph_view, source_id);
-            auto source = graph.GetNodeById(mgp::Id::FromUint(source_mgid));
-            auto nodes = TranslateNodeList(graph, graph_view, pathfinder.reachable_nodes_from(source_id));
-            auto edges = TranslateEdgeList(graph, graph_view, pathfinder.edges_used_from(source_id));
-            auto costs = ToList(pathfinder.distances_from(source_id));
-
-            auto record = record_factory.NewRecord();
-            record.Insert(std::string(shortest_paths::kReturnNegativeCycle).c_str(), false);
-            record.Insert(std::string(shortest_paths::kReturnSourceNode).c_str(), source);
-            record.Insert(std::string(shortest_paths::kReturnNodes).c_str(), nodes);
-            record.Insert(std::string(shortest_paths::kReturnEdges).c_str(), edges);
-            record.Insert(std::string(shortest_paths::kReturnCosts).c_str(), costs);
-        }
-    } catch (const std::exception& e) {
-        record_factory.SetErrorMessage(e.what());
-        return;
+    std::unordered_set<uint64_t> source_ids;
+    for (const auto &value : source_nodes) {
+      auto node = value.ValueNode();
+      auto source_id = GetInnerNodeIdOpt(graph_view, node.Id().AsUint());
+      // Ignore sources not in subgraph
+      if (source_id) {
+        source_ids.emplace(source_id.value());
+      }
     }
+    // If no nodes specified, search all
+    if (source_ids.empty()) {
+      for (auto node : graph_view.Nodes()) {
+        source_ids.emplace(node.id);
+      }
+    }
+
+    shortest_paths::JohnsonsPathfinder<> pathfinder;
+    if (!score_property.empty()) {
+      std::vector<double> scores = GetScores(graph, graph_view, score_property, default_score);
+      pathfinder.search_some_remove_cycles(graph_view, source_ids, scores, cull_ascending, abort_func, threads);
+    } else {
+      pathfinder.search_some(graph_view, source_ids, abort_func, threads);
+    }
+
+    if (pathfinder.has_negative_cycle()) {
+      auto cycle = pathfinder.negative_cycle().value();
+      mgp::List nodes(cycle.nodes.size());
+      mgp::List edges(cycle.edges.size());
+
+      mgp::Path result_path = TranslatePath(graph, graph_view, cycle);
+      mgp::Node cycle_source = result_path.GetNodeAt(0);
+      auto costs = ToList(cycle.costs);
+
+      nodes.Append(mgp::Value(cycle_source));
+      for (size_t edge_index = 0; edge_index < cycle.size(); edge_index++) {
+        edges.Append(mgp::Value(result_path.GetRelationshipAt(edge_index)));
+        nodes.Append(mgp::Value(result_path.GetNodeAt(edge_index + 1)));
+      }
+
+      auto record = record_factory.NewRecord();
+      record.Insert(std::string(shortest_paths::kReturnNegativeCycle).c_str(), true);
+      record.Insert(std::string(shortest_paths::kReturnSourceNode).c_str(), cycle_source);
+      record.Insert(std::string(shortest_paths::kReturnNodes).c_str(), nodes);
+      record.Insert(std::string(shortest_paths::kReturnEdges).c_str(), edges);
+      record.Insert(std::string(shortest_paths::kReturnCosts).c_str(), costs);
+      return;
+    }
+
+    for (auto source_id : source_ids) {
+      auto source_mgid = GetMemgraphNodeId(graph_view, source_id);
+      auto source = graph.GetNodeById(mgp::Id::FromUint(source_mgid));
+      auto nodes = TranslateNodeList(graph, graph_view, pathfinder.reachable_nodes_from(source_id));
+      auto edges = TranslateEdgeList(graph, graph_view, pathfinder.edges_used_from(source_id));
+      auto costs = ToList(pathfinder.distances_from(source_id));
+
+      auto record = record_factory.NewRecord();
+      record.Insert(std::string(shortest_paths::kReturnNegativeCycle).c_str(), false);
+      record.Insert(std::string(shortest_paths::kReturnSourceNode).c_str(), source);
+      record.Insert(std::string(shortest_paths::kReturnNodes).c_str(), nodes);
+      record.Insert(std::string(shortest_paths::kReturnEdges).c_str(), edges);
+      record.Insert(std::string(shortest_paths::kReturnCosts).c_str(), costs);
+    }
+  } catch (const std::exception &e) {
+    record_factory.SetErrorMessage(e.what());
+    return;
+  }
 }
 
 void Johnsons_Paths(mgp_list *args, mgp_graph *memgraph_graph, mgp_result *result, mgp_memory *memory) {
-    // Indicies in the arguments list for parameters
-    enum ArgIdx : size_t {
-        SourceNodes, TargetNodes, WeightProp, ScoreProp, DefaultWeight, DefaultScore, CullAscending, Threads
-    };
-    mgp::MemoryDispatcherGuard mem_guard(memory);
-    mgp::Graph graph{memgraph_graph};
+  // Indicies in the arguments list for parameters
+  enum ArgIdx : size_t {
+    SourceNodes,
+    TargetNodes,
+    WeightProp,
+    ScoreProp,
+    DefaultWeight,
+    DefaultScore,
+    CullAscending,
+    Threads
+  };
+  mgp::MemoryDispatcherGuard mem_guard(memory);
+  mgp::Graph graph{memgraph_graph};
 
-    const auto arguments = mgp::List(args);
-    const auto record_factory = mgp::RecordFactory(result);
-    try {
-        auto source_nodes = arguments[ArgIdx::SourceNodes].ValueList();
-        auto target_nodes = arguments[ArgIdx::TargetNodes].ValueList();
-        const auto weight_property = std::string(arguments[ArgIdx::WeightProp].ValueString());
-        const auto score_property = std::string(arguments[ArgIdx::ScoreProp].ValueString());
-        double default_weight = arguments[ArgIdx::DefaultWeight].ValueDouble();
-        double default_score = arguments[ArgIdx::DefaultScore].ValueDouble();
-        bool cull_ascending = arguments[ArgIdx::CullAscending].ValueBool();
-        int threads = arguments[ArgIdx::Threads].ValueInt();
+  const auto arguments = mgp::List(args);
+  const auto record_factory = mgp::RecordFactory(result);
+  try {
+    auto source_nodes = arguments[ArgIdx::SourceNodes].ValueList();
+    auto target_nodes = arguments[ArgIdx::TargetNodes].ValueList();
+    const auto weight_property = std::string(arguments[ArgIdx::WeightProp].ValueString());
+    const auto score_property = std::string(arguments[ArgIdx::ScoreProp].ValueString());
+    double default_weight = arguments[ArgIdx::DefaultWeight].ValueDouble();
+    double default_score = arguments[ArgIdx::DefaultScore].ValueDouble();
+    bool cull_ascending = arguments[ArgIdx::CullAscending].ValueBool();
+    int threads = arguments[ArgIdx::Threads].ValueInt();
 
-        bool weighted = ! weight_property.empty();
-        const char * weight_prop_cstr = weighted ? weight_property.c_str() : nullptr;
+    bool weighted = !weight_property.empty();
+    const char *weight_prop_cstr = weighted ? weight_property.c_str() : nullptr;
 
-        auto graph_view_ptr = mg_utility::GetGraphView(
-            memgraph_graph, result, memory, mg_graph::GraphType::kDirectedGraph,
-            weighted, weight_prop_cstr, default_weight
-        );
-        const mg_graph::GraphView<>& graph_view = *graph_view_ptr;
+    auto graph_view_ptr = mg_utility::GetGraphView(memgraph_graph, result, memory, mg_graph::GraphType::kDirectedGraph,
+                                                   weighted, weight_prop_cstr, default_weight);
+    const mg_graph::GraphView<> &graph_view = *graph_view_ptr;
 
-        auto abort_func = [&graph] () { graph.CheckMustAbort(); };
+    auto abort_func = [&graph]() { graph.CheckMustAbort(); };
 
-        std::unordered_set<uint64_t> source_ids;
-        for (const auto& value : source_nodes) {
-            auto node = value.ValueNode();
-            auto source_id = GetInnerNodeIdOpt(graph_view, node.Id().AsUint());
-            // Ignore sources not in subgraph
-            if (source_id) {
-                source_ids.emplace(source_id.value());
-            }
-        }
-        // If no nodes specified, search all
-        if (source_ids.empty()) {
-            for (auto node : graph_view.Nodes()) {
-                source_ids.emplace(node.id);
-            }
-        }
-
-        std::unordered_set<uint64_t> target_ids;
-        for (const auto& value : target_nodes) {
-            auto node = value.ValueNode();
-            auto target_id = GetInnerNodeIdOpt(graph_view, node.Id().AsUint());
-            // Ignore targets not in subgraph
-            if (target_id) {
-                target_ids.emplace(target_id.value());
-            }
-        }
-        // If no nodes specified, target all
-        if (target_ids.empty()) {
-            for (auto node : graph_view.Nodes()) {
-                target_ids.emplace(node.id);
-            }
-        }
-
-        shortest_paths::JohnsonsPathfinder<> pathfinder;
-        if (!score_property.empty()) {
-            std::vector<double> scores = GetScores(graph, graph_view, score_property, default_score);
-            pathfinder.search_some_remove_cycles(graph_view, source_ids, scores, cull_ascending, abort_func, threads);
-        } else {
-            pathfinder.search_some(graph_view, source_ids, abort_func, threads);
-        }
-
-        if (pathfinder.has_negative_cycle()) {
-            auto cycle = pathfinder.negative_cycle().value();
-            mgp::Path result_path = TranslatePath(graph, graph_view, cycle);
-            mgp::Node cycle_source = result_path.GetNodeAt(0);
-            auto costs = ToList(cycle.costs);
-
-            auto record = record_factory.NewRecord();
-            record.Insert(std::string(shortest_paths::kReturnNegativeCycle).c_str(), true);
-            record.Insert(std::string(shortest_paths::kReturnSourceNode).c_str(), cycle_source);
-            record.Insert(std::string(shortest_paths::kReturnTargetNode).c_str(), cycle_source);
-            record.Insert(std::string(shortest_paths::kReturnTotalCost).c_str(), cycle.total_cost);
-            record.Insert(std::string(shortest_paths::kReturnCosts).c_str(), costs);
-            record.Insert(std::string(shortest_paths::kReturnPath).c_str(), result_path);
-            return;
-        }
-
-        for (auto source_id : source_ids) {
-            auto source_mgid = GetMemgraphNodeId(graph_view, source_id);
-            auto source = graph.GetNodeById(mgp::Id::FromUint(source_mgid));
-            for (auto target_id : target_ids) {
-                if (target_id == source_id || !pathfinder.has_path(source_id, target_id)) {
-                    continue;
-                }
-
-                auto target_mgid = GetMemgraphNodeId(graph_view, target_id);
-                auto target = graph.GetNodeById(mgp::Id::FromUint(target_mgid));
-
-                auto path = pathfinder.get_path(source_id, target_id);
-                auto result_path = TranslatePath(graph, graph_view, path);
-                auto costs = ToList(path.costs);
-
-                auto record = record_factory.NewRecord();
-                record.Insert(std::string(shortest_paths::kReturnNegativeCycle).c_str(), false);
-                record.Insert(std::string(shortest_paths::kReturnSourceNode).c_str(), source);
-                record.Insert(std::string(shortest_paths::kReturnTargetNode).c_str(), target);
-                record.Insert(std::string(shortest_paths::kReturnTotalCost).c_str(), path.total_cost);
-                record.Insert(std::string(shortest_paths::kReturnCosts).c_str(), costs);
-                record.Insert(std::string(shortest_paths::kReturnPath).c_str(), result_path);
-            }
-        }
-    } catch (const std::exception& e) {
-        record_factory.SetErrorMessage(e.what());
-        return;
+    std::unordered_set<uint64_t> source_ids;
+    for (const auto &value : source_nodes) {
+      auto node = value.ValueNode();
+      auto source_id = GetInnerNodeIdOpt(graph_view, node.Id().AsUint());
+      // Ignore sources not in subgraph
+      if (source_id) {
+        source_ids.emplace(source_id.value());
+      }
     }
+    // If no nodes specified, search all
+    if (source_ids.empty()) {
+      for (auto node : graph_view.Nodes()) {
+        source_ids.emplace(node.id);
+      }
+    }
+
+    std::unordered_set<uint64_t> target_ids;
+    for (const auto &value : target_nodes) {
+      auto node = value.ValueNode();
+      auto target_id = GetInnerNodeIdOpt(graph_view, node.Id().AsUint());
+      // Ignore targets not in subgraph
+      if (target_id) {
+        target_ids.emplace(target_id.value());
+      }
+    }
+    // If no nodes specified, target all
+    if (target_ids.empty()) {
+      for (auto node : graph_view.Nodes()) {
+        target_ids.emplace(node.id);
+      }
+    }
+
+    shortest_paths::JohnsonsPathfinder<> pathfinder;
+    if (!score_property.empty()) {
+      std::vector<double> scores = GetScores(graph, graph_view, score_property, default_score);
+      pathfinder.search_some_remove_cycles(graph_view, source_ids, scores, cull_ascending, abort_func, threads);
+    } else {
+      pathfinder.search_some(graph_view, source_ids, abort_func, threads);
+    }
+
+    if (pathfinder.has_negative_cycle()) {
+      auto cycle = pathfinder.negative_cycle().value();
+      mgp::Path result_path = TranslatePath(graph, graph_view, cycle);
+      mgp::Node cycle_source = result_path.GetNodeAt(0);
+      auto costs = ToList(cycle.costs);
+
+      auto record = record_factory.NewRecord();
+      record.Insert(std::string(shortest_paths::kReturnNegativeCycle).c_str(), true);
+      record.Insert(std::string(shortest_paths::kReturnSourceNode).c_str(), cycle_source);
+      record.Insert(std::string(shortest_paths::kReturnTargetNode).c_str(), cycle_source);
+      record.Insert(std::string(shortest_paths::kReturnTotalCost).c_str(), cycle.total_cost);
+      record.Insert(std::string(shortest_paths::kReturnCosts).c_str(), costs);
+      record.Insert(std::string(shortest_paths::kReturnPath).c_str(), result_path);
+      return;
+    }
+
+    for (auto source_id : source_ids) {
+      auto source_mgid = GetMemgraphNodeId(graph_view, source_id);
+      auto source = graph.GetNodeById(mgp::Id::FromUint(source_mgid));
+      for (auto target_id : target_ids) {
+        if (target_id == source_id || !pathfinder.has_path(source_id, target_id)) {
+          continue;
+        }
+
+        auto target_mgid = GetMemgraphNodeId(graph_view, target_id);
+        auto target = graph.GetNodeById(mgp::Id::FromUint(target_mgid));
+
+        auto path = pathfinder.get_path(source_id, target_id);
+        auto result_path = TranslatePath(graph, graph_view, path);
+        auto costs = ToList(path.costs);
+
+        auto record = record_factory.NewRecord();
+        record.Insert(std::string(shortest_paths::kReturnNegativeCycle).c_str(), false);
+        record.Insert(std::string(shortest_paths::kReturnSourceNode).c_str(), source);
+        record.Insert(std::string(shortest_paths::kReturnTargetNode).c_str(), target);
+        record.Insert(std::string(shortest_paths::kReturnTotalCost).c_str(), path.total_cost);
+        record.Insert(std::string(shortest_paths::kReturnCosts).c_str(), costs);
+        record.Insert(std::string(shortest_paths::kReturnPath).c_str(), result_path);
+      }
+    }
+  } catch (const std::exception &e) {
+    record_factory.SetErrorMessage(e.what());
+    return;
+  }
 }
 
 void Johnsons_K_Shortest(mgp_list *args, mgp_graph *memgraph_graph, mgp_result *result, mgp_memory *memory) {
-    using PathVec = shortest_paths::JohnsonsPathfinder<>::PathVec;
+  using PathVec = shortest_paths::JohnsonsPathfinder<>::PathVec;
 
-    // Indicies in the arguments list for parameters
-    enum ArgIdx : size_t {
-        SourceNode, TargetNode, K, WeightProp, ScoreProp, DefaultWeight, DefaultScore, CullAscending, Threads
-    };
-    mgp::MemoryDispatcherGuard mem_guard(memory);
-    mgp::Graph graph{memgraph_graph};
+  // Indicies in the arguments list for parameters
+  enum ArgIdx : size_t {
+    SourceNode,
+    TargetNode,
+    K,
+    WeightProp,
+    ScoreProp,
+    DefaultWeight,
+    DefaultScore,
+    CullAscending,
+    Threads
+  };
+  mgp::MemoryDispatcherGuard mem_guard(memory);
+  mgp::Graph graph{memgraph_graph};
 
-    const auto arguments = mgp::List(args);
-    const auto record_factory = mgp::RecordFactory(result);
-    try {
-        const auto source_node = arguments[ArgIdx::SourceNode].ValueNode();
-        const auto target_node = arguments[ArgIdx::TargetNode].ValueNode();
-        const auto K = arguments[ArgIdx::K].ValueInt();
-        const auto weight_property = std::string(arguments[ArgIdx::WeightProp].ValueString());
-        const auto score_property = std::string(arguments[ArgIdx::ScoreProp].ValueString());
-        double default_weight = arguments[ArgIdx::DefaultWeight].ValueDouble();
-        double default_score = arguments[ArgIdx::DefaultScore].ValueDouble();
-        bool cull_ascending = arguments[ArgIdx::CullAscending].ValueBool();
-        int threads = arguments[ArgIdx::Threads].ValueInt();
+  const auto arguments = mgp::List(args);
+  const auto record_factory = mgp::RecordFactory(result);
+  try {
+    const auto source_node = arguments[ArgIdx::SourceNode].ValueNode();
+    const auto target_node = arguments[ArgIdx::TargetNode].ValueNode();
+    const auto K = arguments[ArgIdx::K].ValueInt();
+    const auto weight_property = std::string(arguments[ArgIdx::WeightProp].ValueString());
+    const auto score_property = std::string(arguments[ArgIdx::ScoreProp].ValueString());
+    double default_weight = arguments[ArgIdx::DefaultWeight].ValueDouble();
+    double default_score = arguments[ArgIdx::DefaultScore].ValueDouble();
+    bool cull_ascending = arguments[ArgIdx::CullAscending].ValueBool();
+    int threads = arguments[ArgIdx::Threads].ValueInt();
 
-        bool weighted = ! weight_property.empty();
-        const char * weight_prop_cstr = weighted ? weight_property.c_str() : nullptr;
+    bool weighted = !weight_property.empty();
+    const char *weight_prop_cstr = weighted ? weight_property.c_str() : nullptr;
 
-        if (K < 0) {
-            throw mgp::ValueException("K cannot be negative");
-        }
-        if (K == 0) {
-            // Why did you even call this procedure?
-            return;
-        }
-
-        auto graph_view_ptr = mg_utility::GetGraphView(
-            memgraph_graph, result, memory, mg_graph::GraphType::kDirectedGraph,
-            weighted, weight_prop_cstr, default_weight
-        );
-        const mg_graph::GraphView<>& graph_view = *graph_view_ptr;
-
-        const auto source_mgid = source_node.Id().AsUint();
-        const auto target_mgid = target_node.Id().AsUint();
-        const auto maybe_source_id = GetInnerNodeIdOpt(graph_view, source_mgid);
-        const auto maybe_target_id = GetInnerNodeIdOpt(graph_view, target_mgid);
-        if (!maybe_source_id || !maybe_target_id) {
-            // Either source or target is not in subgraph, so there can be no paths between them.
-            return;
-        }
-        const auto source_id = maybe_source_id.value();
-        const auto target_id = maybe_target_id.value();
-
-        auto abort_func = [&graph] () { graph.CheckMustAbort(); };
-
-        shortest_paths::JohnsonsPathfinder<> pathfinder;
-        PathVec paths;
-        if (!score_property.empty()) {
-            std::vector<double> scores = GetScores(graph, graph_view, score_property, default_score);
-            paths = pathfinder.k_shortest_paths_remove_cycles(graph_view, source_id, target_id, K, scores, cull_ascending, abort_func, threads);
-        } else {
-            paths = pathfinder.k_shortest_paths(graph_view, source_id, target_id, K, abort_func, threads);
-        }
-
-        if (pathfinder.has_negative_cycle()) {
-            auto cycle = pathfinder.negative_cycle().value();
-            mgp::Path result_path = TranslatePath(graph, graph_view, cycle);
-            mgp::Node cycle_source = result_path.GetNodeAt(0);
-            auto costs = ToList(cycle.costs);
-
-            auto record = record_factory.NewRecord();
-            record.Insert(std::string(shortest_paths::kReturnNegativeCycle).c_str(), true);
-            record.Insert(std::string(shortest_paths::kReturnIndex).c_str(), 0L);
-            record.Insert(std::string(shortest_paths::kReturnSourceNode).c_str(), cycle_source);
-            record.Insert(std::string(shortest_paths::kReturnTargetNode).c_str(), cycle_source);
-            record.Insert(std::string(shortest_paths::kReturnTotalCost).c_str(), cycle.total_cost);
-            record.Insert(std::string(shortest_paths::kReturnCosts).c_str(), costs);
-            record.Insert(std::string(shortest_paths::kReturnPath).c_str(), result_path);
-            return;
-        }
-
-        for (std::size_t path_index = 0; path_index < paths.size(); path_index++) {
-            const auto& path = paths[path_index];
-
-            mgp::Path result_path = TranslatePath(graph, graph_view, path);
-            mgp::Node current_node = source_node;
-            auto costs = ToList(path.costs);
-
-            auto record = record_factory.NewRecord();
-            record.Insert(std::string(shortest_paths::kReturnNegativeCycle).c_str(), false);
-            record.Insert(std::string(shortest_paths::kReturnIndex).c_str(), int64_t(path_index));
-            record.Insert(std::string(shortest_paths::kReturnSourceNode).c_str(), source_node);
-            record.Insert(std::string(shortest_paths::kReturnTargetNode).c_str(), target_node);
-            record.Insert(std::string(shortest_paths::kReturnTotalCost).c_str(), path.total_cost);
-            record.Insert(std::string(shortest_paths::kReturnCosts).c_str(), costs);
-            record.Insert(std::string(shortest_paths::kReturnPath).c_str(), result_path);
-        }
-    } catch (const std::exception& e) {
-        record_factory.SetErrorMessage(e.what());
-        return;
+    if (K < 0) {
+      throw mgp::ValueException("K cannot be negative");
     }
+    if (K == 0) {
+      // Why did you even call this procedure?
+      return;
+    }
+
+    auto graph_view_ptr = mg_utility::GetGraphView(memgraph_graph, result, memory, mg_graph::GraphType::kDirectedGraph,
+                                                   weighted, weight_prop_cstr, default_weight);
+    const mg_graph::GraphView<> &graph_view = *graph_view_ptr;
+
+    const auto source_mgid = source_node.Id().AsUint();
+    const auto target_mgid = target_node.Id().AsUint();
+    const auto maybe_source_id = GetInnerNodeIdOpt(graph_view, source_mgid);
+    const auto maybe_target_id = GetInnerNodeIdOpt(graph_view, target_mgid);
+    if (!maybe_source_id || !maybe_target_id) {
+      // Either source or target is not in subgraph, so there can be no paths between them.
+      return;
+    }
+    const auto source_id = maybe_source_id.value();
+    const auto target_id = maybe_target_id.value();
+
+    auto abort_func = [&graph]() { graph.CheckMustAbort(); };
+
+    shortest_paths::JohnsonsPathfinder<> pathfinder;
+    PathVec paths;
+    if (!score_property.empty()) {
+      std::vector<double> scores = GetScores(graph, graph_view, score_property, default_score);
+      paths = pathfinder.k_shortest_paths_remove_cycles(graph_view, source_id, target_id, K, scores, cull_ascending,
+                                                        abort_func, threads);
+    } else {
+      paths = pathfinder.k_shortest_paths(graph_view, source_id, target_id, K, abort_func, threads);
+    }
+
+    if (pathfinder.has_negative_cycle()) {
+      auto cycle = pathfinder.negative_cycle().value();
+      mgp::Path result_path = TranslatePath(graph, graph_view, cycle);
+      mgp::Node cycle_source = result_path.GetNodeAt(0);
+      auto costs = ToList(cycle.costs);
+
+      auto record = record_factory.NewRecord();
+      record.Insert(std::string(shortest_paths::kReturnNegativeCycle).c_str(), true);
+      record.Insert(std::string(shortest_paths::kReturnIndex).c_str(), 0L);
+      record.Insert(std::string(shortest_paths::kReturnSourceNode).c_str(), cycle_source);
+      record.Insert(std::string(shortest_paths::kReturnTargetNode).c_str(), cycle_source);
+      record.Insert(std::string(shortest_paths::kReturnTotalCost).c_str(), cycle.total_cost);
+      record.Insert(std::string(shortest_paths::kReturnCosts).c_str(), costs);
+      record.Insert(std::string(shortest_paths::kReturnPath).c_str(), result_path);
+      return;
+    }
+
+    for (std::size_t path_index = 0; path_index < paths.size(); path_index++) {
+      const auto &path = paths[path_index];
+
+      mgp::Path result_path = TranslatePath(graph, graph_view, path);
+      mgp::Node current_node = source_node;
+      auto costs = ToList(path.costs);
+
+      auto record = record_factory.NewRecord();
+      record.Insert(std::string(shortest_paths::kReturnNegativeCycle).c_str(), false);
+      record.Insert(std::string(shortest_paths::kReturnIndex).c_str(), int64_t(path_index));
+      record.Insert(std::string(shortest_paths::kReturnSourceNode).c_str(), source_node);
+      record.Insert(std::string(shortest_paths::kReturnTargetNode).c_str(), target_node);
+      record.Insert(std::string(shortest_paths::kReturnTotalCost).c_str(), path.total_cost);
+      record.Insert(std::string(shortest_paths::kReturnCosts).c_str(), costs);
+      record.Insert(std::string(shortest_paths::kReturnPath).c_str(), result_path);
+    }
+  } catch (const std::exception &e) {
+    record_factory.SetErrorMessage(e.what());
+    return;
+  }
 }
 
 void Johnsons_Disjoint_K_Shortest(mgp_list *args, mgp_graph *memgraph_graph, mgp_result *result, mgp_memory *memory) {
-    using PathVec = shortest_paths::JohnsonsPathfinder<>::PathVec;
+  using PathVec = shortest_paths::JohnsonsPathfinder<>::PathVec;
 
-    // Indicies in the arguments list for parameters
-    enum ArgIdx : size_t {
-        SourceNode, TargetNode, K, WeightProp, ScoreProp, DefaultWeight, DefaultScore, CullAscending
-    };
-    mgp::MemoryDispatcherGuard mem_guard(memory);
-    mgp::Graph graph{memgraph_graph};
+  // Indicies in the arguments list for parameters
+  enum ArgIdx : size_t { SourceNode, TargetNode, K, WeightProp, ScoreProp, DefaultWeight, DefaultScore, CullAscending };
+  mgp::MemoryDispatcherGuard mem_guard(memory);
+  mgp::Graph graph{memgraph_graph};
 
-    const auto arguments = mgp::List(args);
-    const auto record_factory = mgp::RecordFactory(result);
-    try {
-        const auto source_node = arguments[ArgIdx::SourceNode].ValueNode();
-        const auto target_node = arguments[ArgIdx::TargetNode].ValueNode();
-        const auto K = arguments[ArgIdx::K].ValueInt();
-        const auto weight_property = std::string(arguments[ArgIdx::WeightProp].ValueString());
-        const auto score_property = std::string(arguments[ArgIdx::ScoreProp].ValueString());
-        double default_weight = arguments[ArgIdx::DefaultWeight].ValueDouble();
-        double default_score = arguments[ArgIdx::DefaultScore].ValueDouble();
-        bool cull_ascending = arguments[ArgIdx::CullAscending].ValueBool();
+  const auto arguments = mgp::List(args);
+  const auto record_factory = mgp::RecordFactory(result);
+  try {
+    const auto source_node = arguments[ArgIdx::SourceNode].ValueNode();
+    const auto target_node = arguments[ArgIdx::TargetNode].ValueNode();
+    const auto K = arguments[ArgIdx::K].ValueInt();
+    const auto weight_property = std::string(arguments[ArgIdx::WeightProp].ValueString());
+    const auto score_property = std::string(arguments[ArgIdx::ScoreProp].ValueString());
+    double default_weight = arguments[ArgIdx::DefaultWeight].ValueDouble();
+    double default_score = arguments[ArgIdx::DefaultScore].ValueDouble();
+    bool cull_ascending = arguments[ArgIdx::CullAscending].ValueBool();
 
-        bool weighted = ! weight_property.empty();
-        const char * weight_prop_cstr = weighted ? weight_property.c_str() : nullptr;
+    bool weighted = !weight_property.empty();
+    const char *weight_prop_cstr = weighted ? weight_property.c_str() : nullptr;
 
-        if (K < 0) {
-            throw mgp::ValueException("K cannot be negative");
-        }
-
-        auto graph_view_ptr = mg_utility::GetGraphView(
-            memgraph_graph, result, memory, mg_graph::GraphType::kDirectedGraph,
-            weighted, weight_prop_cstr, default_weight
-        );
-        const mg_graph::GraphView<>& graph_view = *graph_view_ptr;
-
-        const auto source_mgid = source_node.Id().AsUint();
-        const auto target_mgid = target_node.Id().AsUint();
-        const auto maybe_source_id = GetInnerNodeIdOpt(graph_view, source_mgid);
-        const auto maybe_target_id = GetInnerNodeIdOpt(graph_view, target_mgid);
-        if (!maybe_source_id || !maybe_target_id) {
-            // Either source or target is not in subgraph, so there can be no paths between them.
-            return;
-        }
-        const auto source_id = maybe_source_id.value();
-        const auto target_id = maybe_target_id.value();
-
-        auto abort_func = [&graph] () { graph.CheckMustAbort(); };
-
-        shortest_paths::JohnsonsPathfinder<> pathfinder;
-        PathVec paths;
-        if (!score_property.empty()) {
-            std::vector<double> scores = GetScores(graph, graph_view, score_property, default_score);
-            paths = pathfinder.disjoint_k_shortest_paths_remove_cycles(graph_view, source_id, target_id, K, scores, cull_ascending, abort_func);
-        } else {
-            paths = pathfinder.disjoint_k_shortest_paths(graph_view, source_id, target_id, K, abort_func);
-        }
-
-        if (pathfinder.has_negative_cycle()) {
-            auto cycle = pathfinder.negative_cycle().value();
-            mgp::Path result_path = TranslatePath(graph, graph_view, cycle);
-            mgp::Node cycle_source = result_path.GetNodeAt(0);
-            auto costs = ToList(cycle.costs);
-
-            auto record = record_factory.NewRecord();
-            record.Insert(std::string(shortest_paths::kReturnNegativeCycle).c_str(), true);
-            record.Insert(std::string(shortest_paths::kReturnIndex).c_str(), 0L);
-            record.Insert(std::string(shortest_paths::kReturnSourceNode).c_str(), cycle_source);
-            record.Insert(std::string(shortest_paths::kReturnTargetNode).c_str(), cycle_source);
-            record.Insert(std::string(shortest_paths::kReturnTotalCost).c_str(), cycle.total_cost);
-            record.Insert(std::string(shortest_paths::kReturnCosts).c_str(), costs);
-            record.Insert(std::string(shortest_paths::kReturnPath).c_str(), result_path);
-            return;
-        }
-
-        for (std::size_t path_index = 0; path_index < paths.size(); path_index++) {
-            const auto& path = paths[path_index];
-
-            mgp::Path result_path = TranslatePath(graph, graph_view, path);
-            mgp::Node current_node = source_node;
-            auto costs = ToList(path.costs);
-
-            auto record = record_factory.NewRecord();
-            record.Insert(std::string(shortest_paths::kReturnNegativeCycle).c_str(), false);
-            record.Insert(std::string(shortest_paths::kReturnIndex).c_str(), int64_t(path_index));
-            record.Insert(std::string(shortest_paths::kReturnSourceNode).c_str(), source_node);
-            record.Insert(std::string(shortest_paths::kReturnTargetNode).c_str(), target_node);
-            record.Insert(std::string(shortest_paths::kReturnTotalCost).c_str(), path.total_cost);
-            record.Insert(std::string(shortest_paths::kReturnCosts).c_str(), costs);
-            record.Insert(std::string(shortest_paths::kReturnPath).c_str(), result_path);
-        }
-    } catch (const std::exception& e) {
-        record_factory.SetErrorMessage(e.what());
-        return;
+    if (K < 0) {
+      throw mgp::ValueException("K cannot be negative");
     }
+
+    auto graph_view_ptr = mg_utility::GetGraphView(memgraph_graph, result, memory, mg_graph::GraphType::kDirectedGraph,
+                                                   weighted, weight_prop_cstr, default_weight);
+    const mg_graph::GraphView<> &graph_view = *graph_view_ptr;
+
+    const auto source_mgid = source_node.Id().AsUint();
+    const auto target_mgid = target_node.Id().AsUint();
+    const auto maybe_source_id = GetInnerNodeIdOpt(graph_view, source_mgid);
+    const auto maybe_target_id = GetInnerNodeIdOpt(graph_view, target_mgid);
+    if (!maybe_source_id || !maybe_target_id) {
+      // Either source or target is not in subgraph, so there can be no paths between them.
+      return;
+    }
+    const auto source_id = maybe_source_id.value();
+    const auto target_id = maybe_target_id.value();
+
+    auto abort_func = [&graph]() { graph.CheckMustAbort(); };
+
+    shortest_paths::JohnsonsPathfinder<> pathfinder;
+    PathVec paths;
+    if (!score_property.empty()) {
+      std::vector<double> scores = GetScores(graph, graph_view, score_property, default_score);
+      paths = pathfinder.disjoint_k_shortest_paths_remove_cycles(graph_view, source_id, target_id, K, scores,
+                                                                 cull_ascending, abort_func);
+    } else {
+      paths = pathfinder.disjoint_k_shortest_paths(graph_view, source_id, target_id, K, abort_func);
+    }
+
+    if (pathfinder.has_negative_cycle()) {
+      auto cycle = pathfinder.negative_cycle().value();
+      mgp::Path result_path = TranslatePath(graph, graph_view, cycle);
+      mgp::Node cycle_source = result_path.GetNodeAt(0);
+      auto costs = ToList(cycle.costs);
+
+      auto record = record_factory.NewRecord();
+      record.Insert(std::string(shortest_paths::kReturnNegativeCycle).c_str(), true);
+      record.Insert(std::string(shortest_paths::kReturnIndex).c_str(), 0L);
+      record.Insert(std::string(shortest_paths::kReturnSourceNode).c_str(), cycle_source);
+      record.Insert(std::string(shortest_paths::kReturnTargetNode).c_str(), cycle_source);
+      record.Insert(std::string(shortest_paths::kReturnTotalCost).c_str(), cycle.total_cost);
+      record.Insert(std::string(shortest_paths::kReturnCosts).c_str(), costs);
+      record.Insert(std::string(shortest_paths::kReturnPath).c_str(), result_path);
+      return;
+    }
+
+    for (std::size_t path_index = 0; path_index < paths.size(); path_index++) {
+      const auto &path = paths[path_index];
+
+      mgp::Path result_path = TranslatePath(graph, graph_view, path);
+      mgp::Node current_node = source_node;
+      auto costs = ToList(path.costs);
+
+      auto record = record_factory.NewRecord();
+      record.Insert(std::string(shortest_paths::kReturnNegativeCycle).c_str(), false);
+      record.Insert(std::string(shortest_paths::kReturnIndex).c_str(), int64_t(path_index));
+      record.Insert(std::string(shortest_paths::kReturnSourceNode).c_str(), source_node);
+      record.Insert(std::string(shortest_paths::kReturnTargetNode).c_str(), target_node);
+      record.Insert(std::string(shortest_paths::kReturnTotalCost).c_str(), path.total_cost);
+      record.Insert(std::string(shortest_paths::kReturnCosts).c_str(), costs);
+      record.Insert(std::string(shortest_paths::kReturnPath).c_str(), result_path);
+    }
+  } catch (const std::exception &e) {
+    record_factory.SetErrorMessage(e.what());
+    return;
+  }
 }
 
 void DisjointKShortestPaths(mgp_list *args, mgp_graph *memgraph_graph, mgp_result *result, mgp_memory *memory) {
-    // Indicies in the arguments list for parameters
-    enum ArgIdx : size_t {
-        Source, Sink, K, WeightProp, ScoreProp, DefaultWeight, DefaultScore, CullPerRound, CullAscending,
-        FixedCostProp, DefaultFixedCost, FlowAmount, WeightTransform
-    };
+  // Indicies in the arguments list for parameters
+  enum ArgIdx : size_t {
+    Source,
+    Sink,
+    K,
+    WeightProp,
+    ScoreProp,
+    DefaultWeight,
+    DefaultScore,
+    CullPerRound,
+    CullAscending,
+    FixedCostProp,
+    DefaultFixedCost,
+    FlowAmount,
+    WeightTransform
+  };
 
-    mgp::MemoryDispatcherGuard mem_guard(memory);
-    mgp::Graph graph(memgraph_graph);
+  mgp::MemoryDispatcherGuard mem_guard(memory);
+  mgp::Graph graph(memgraph_graph);
 
-    const auto arguments = mgp::List(args);
-    const auto record_factory = mgp::RecordFactory(result);
-    try {
-        const auto source_node = arguments[ArgIdx::Source].ValueNode();
-        const auto sink_node = arguments[ArgIdx::Sink].ValueNode();
-        const auto K = arguments[ArgIdx::K].ValueInt();
-        const auto weight_property = std::string(arguments[ArgIdx::WeightProp].ValueString());
-        const auto score_property = std::string(arguments[ArgIdx::ScoreProp].ValueString());
-        const auto default_weight = arguments[ArgIdx::DefaultWeight].ValueDouble();
-        const auto default_score = arguments[ArgIdx::DefaultScore].ValueDouble();
-        const auto cull_per_round = arguments[ArgIdx::CullPerRound].ValueInt();
-        const auto cull_ascending = arguments[ArgIdx::CullAscending].ValueBool();
-        const auto fixed_cost_property = std::string(arguments[ArgIdx::FixedCostProp].ValueString());
-        const auto default_fixed_cost = arguments[ArgIdx::DefaultFixedCost].ValueDouble();
-        const auto flow_amount = arguments[ArgIdx::FlowAmount].ValueDouble();
-        const auto weight_transform_str = arguments[ArgIdx::WeightTransform].ValueString();
+  const auto arguments = mgp::List(args);
+  const auto record_factory = mgp::RecordFactory(result);
+  try {
+    const auto source_node = arguments[ArgIdx::Source].ValueNode();
+    const auto sink_node = arguments[ArgIdx::Sink].ValueNode();
+    const auto K = arguments[ArgIdx::K].ValueInt();
+    const auto weight_property = std::string(arguments[ArgIdx::WeightProp].ValueString());
+    const auto score_property = std::string(arguments[ArgIdx::ScoreProp].ValueString());
+    const auto default_weight = arguments[ArgIdx::DefaultWeight].ValueDouble();
+    const auto default_score = arguments[ArgIdx::DefaultScore].ValueDouble();
+    const auto cull_per_round = arguments[ArgIdx::CullPerRound].ValueInt();
+    const auto cull_ascending = arguments[ArgIdx::CullAscending].ValueBool();
+    const auto fixed_cost_property = std::string(arguments[ArgIdx::FixedCostProp].ValueString());
+    const auto default_fixed_cost = arguments[ArgIdx::DefaultFixedCost].ValueDouble();
+    const auto flow_amount = arguments[ArgIdx::FlowAmount].ValueDouble();
+    const auto weight_transform_str = arguments[ArgIdx::WeightTransform].ValueString();
 
-        if (K < 0) {
-            throw mgp::ValueException("K cannot be negative");
-        }
-        if (!score_property.empty() && cull_per_round < 1) {
-            throw mgp::ValueException("cull_per_round must be at least 1");
-        }
-
-        auto graph_view_ptr = GetGraphViewAdjusted<uint64_t>(
-            graph,
-            weight_property, default_weight,
-            fixed_cost_property, default_fixed_cost,
-            flow_amount, StringToWeightTransform(weight_transform_str)
-        );
-
-        const mg_graph::GraphView<>& graph_view = *graph_view_ptr;
-
-        const auto source_mgid = source_node.Id().AsUint();
-        const auto sink_mgid = sink_node.Id().AsUint();
-
-        const auto maybe_source_id = GetInnerNodeIdOpt(graph_view, source_mgid);
-        const auto maybe_sink_id = GetInnerNodeIdOpt(graph_view, sink_mgid);
-        if (!maybe_source_id || !maybe_sink_id) {
-            // Either source or sink is not in subgraph, so there can be no paths between them.
-            return;
-        }
-        const auto source_id = maybe_source_id.value();
-        const auto sink_id = maybe_sink_id.value();
-
-        auto abort_func = [&graph] () { graph.CheckMustAbort(); };
-        std::vector<shortest_paths::Path<>> paths;
-        if (!score_property.empty()) {
-            const auto scores = GetScores(graph, graph_view, score_property, default_score);
-            paths = shortest_paths::PartialDisjointKShortestPaths(graph_view, source_id, sink_id, K, scores, cull_per_round, cull_ascending, abort_func);
-        } else {
-            paths = shortest_paths::DisjointKShortestPaths(graph_view, source_id, sink_id, K, abort_func);
-        }
-
-        for (std::size_t path_index = 0; path_index < paths.size(); path_index++) {
-            const auto& path = paths[path_index];
-
-            mgp::Path result_path = TranslatePath(graph, graph_view, path);
-            mgp::Node current_node = source_node;
-            auto costs = ToList(path.costs);
-
-            auto record = record_factory.NewRecord();
-            record.Insert(std::string(shortest_paths::kReturnIndex).c_str(), int64_t(path_index));
-            record.Insert(std::string(shortest_paths::kReturnSourceNode).c_str(), source_node);
-            record.Insert(std::string(shortest_paths::kReturnTargetNode).c_str(), sink_node);
-            record.Insert(std::string(shortest_paths::kReturnTotalCost).c_str(), path.total_cost);
-            record.Insert(std::string(shortest_paths::kReturnCosts).c_str(), costs);
-            record.Insert(std::string(shortest_paths::kReturnPath).c_str(), result_path);
-        }
-    } catch (const std::exception& e) {
-        record_factory.SetErrorMessage(e.what());
-        return;
+    if (K < 0) {
+      throw mgp::ValueException("K cannot be negative");
     }
+    if (!score_property.empty() && cull_per_round < 1) {
+      throw mgp::ValueException("cull_per_round must be at least 1");
+    }
+
+    auto graph_view_ptr =
+        GetGraphViewAdjusted<uint64_t>(graph, weight_property, default_weight, fixed_cost_property, default_fixed_cost,
+                                       flow_amount, StringToWeightTransform(weight_transform_str));
+
+    const mg_graph::GraphView<> &graph_view = *graph_view_ptr;
+
+    const auto source_mgid = source_node.Id().AsUint();
+    const auto sink_mgid = sink_node.Id().AsUint();
+
+    const auto maybe_source_id = GetInnerNodeIdOpt(graph_view, source_mgid);
+    const auto maybe_sink_id = GetInnerNodeIdOpt(graph_view, sink_mgid);
+    if (!maybe_source_id || !maybe_sink_id) {
+      // Either source or sink is not in subgraph, so there can be no paths between them.
+      return;
+    }
+    const auto source_id = maybe_source_id.value();
+    const auto sink_id = maybe_sink_id.value();
+
+    auto abort_func = [&graph]() { graph.CheckMustAbort(); };
+    std::vector<shortest_paths::Path<>> paths;
+    if (!score_property.empty()) {
+      const auto scores = GetScores(graph, graph_view, score_property, default_score);
+      paths = shortest_paths::PartialDisjointKShortestPaths(graph_view, source_id, sink_id, K, scores, cull_per_round,
+                                                            cull_ascending, abort_func);
+    } else {
+      paths = shortest_paths::DisjointKShortestPaths(graph_view, source_id, sink_id, K, abort_func);
+    }
+
+    for (std::size_t path_index = 0; path_index < paths.size(); path_index++) {
+      const auto &path = paths[path_index];
+
+      mgp::Path result_path = TranslatePath(graph, graph_view, path);
+      mgp::Node current_node = source_node;
+      auto costs = ToList(path.costs);
+
+      auto record = record_factory.NewRecord();
+      record.Insert(std::string(shortest_paths::kReturnIndex).c_str(), int64_t(path_index));
+      record.Insert(std::string(shortest_paths::kReturnSourceNode).c_str(), source_node);
+      record.Insert(std::string(shortest_paths::kReturnTargetNode).c_str(), sink_node);
+      record.Insert(std::string(shortest_paths::kReturnTotalCost).c_str(), path.total_cost);
+      record.Insert(std::string(shortest_paths::kReturnCosts).c_str(), costs);
+      record.Insert(std::string(shortest_paths::kReturnPath).c_str(), result_path);
+    }
+  } catch (const std::exception &e) {
+    record_factory.SetErrorMessage(e.what());
+    return;
+  }
 }
 
 void SuccessiveShortestPaths(mgp_list *args, mgp_graph *memgraph_graph, mgp_result *result, mgp_memory *memory) {
-    // Indicies in the arguments list for parameters
-    enum ArgIdx : size_t {
-        Source, Target, FlowIn,
-        Options
-    };
+  // Indicies in the arguments list for parameters
+  enum ArgIdx : size_t { Source, Target, FlowIn, Options };
 
-    mgp::MemoryDispatcherGuard mem_guard(memory);
-    mgp::Graph graph{memgraph_graph};
+  mgp::MemoryDispatcherGuard mem_guard(memory);
+  mgp::Graph graph{memgraph_graph};
 
-    const auto arguments = mgp::List(args);
-    const auto record_factory = mgp::RecordFactory(result);
-    try {
-        const auto source_node = arguments[ArgIdx::Source].ValueNode();
-        const auto target_node = arguments[ArgIdx::Target].ValueNode();
-        const auto flow_in = arguments[ArgIdx::FlowIn].ValueDouble();
-        const sp::util::Options options(arguments[ArgIdx::Options].ValueMap());
+  const auto arguments = mgp::List(args);
+  const auto record_factory = mgp::RecordFactory(result);
+  try {
+    const auto source_node = arguments[ArgIdx::Source].ValueNode();
+    const auto target_node = arguments[ArgIdx::Target].ValueNode();
+    const auto flow_in = arguments[ArgIdx::FlowIn].ValueDouble();
+    const sp::util::Options options(arguments[ArgIdx::Options].ValueMap());
 
-        const auto weight_property = options.String(sp::kArgumentRelationshipWeightProperty).value_or("");
-        const auto capacity_property = options.String(sp::kArgumentRelationshipCapacityProperty).value_or("");
-        const auto factor_property = options.String(sp::kArgumentRelationshipFactorProperty).value_or("");
-        const auto default_weight = options.Numeric(sp::kArgumentDefaultWeight).value_or(1.0);
-        const auto default_capacity = options.Numeric(sp::kArgumentDefaultCapacity).value_or(0.0);
-        const auto default_factor = options.Numeric(sp::kArgumentDefaultFactor).value_or(1.0);
-        const auto flow_conversion_str = options.String(sp::kArgumentFlowConversion).value_or("");
-        const auto epsilon = options.Numeric(sp::kArgumentEpsilon).value_or(1.0e-6);
-        const auto fixed_cost_property = options.String(sp::kArgumentRelationshipFixedCostProperty).value_or("");
-        const auto default_fixed_cost = options.Numeric(sp::kArgumentDefaultFixedCost).value_or(0.0);
-        const auto weight_transform_str = options.String(sp::kArgumentWeightTransform).value_or("");
+    const auto weight_property = options.String(sp::kArgumentRelationshipWeightProperty).value_or("");
+    const auto capacity_property = options.String(sp::kArgumentRelationshipCapacityProperty).value_or("");
+    const auto factor_property = options.String(sp::kArgumentRelationshipFactorProperty).value_or("");
+    const auto default_weight = options.Numeric(sp::kArgumentDefaultWeight).value_or(1.0);
+    const auto default_capacity = options.Numeric(sp::kArgumentDefaultCapacity).value_or(0.0);
+    const auto default_factor = options.Numeric(sp::kArgumentDefaultFactor).value_or(1.0);
+    const auto flow_conversion_str = options.String(sp::kArgumentFlowConversion).value_or("");
+    const auto epsilon = options.Numeric(sp::kArgumentEpsilon).value_or(1.0e-6);
+    const auto fixed_cost_property = options.String(sp::kArgumentRelationshipFixedCostProperty).value_or("");
+    const auto default_fixed_cost = options.Numeric(sp::kArgumentDefaultFixedCost).value_or(0.0);
+    const auto weight_transform_str = options.String(sp::kArgumentWeightTransform).value_or("");
 
-        const std::unordered_set<std::string> convert_values_none({"", "none"});
-        const std::unordered_set<std::string> convert_values_t_over_s({"target/source", "t/s", "b/a", "out/in"});
-        const std::unordered_set<std::string> convert_values_s_over_t({"source/target", "s/t", "a/b", "in/out"});
+    const std::unordered_set<std::string> convert_values_none({"", "none"});
+    const std::unordered_set<std::string> convert_values_t_over_s({"target/source", "t/s", "b/a", "out/in"});
+    const std::unordered_set<std::string> convert_values_s_over_t({"source/target", "s/t", "a/b", "in/out"});
 
-        shortest_paths::FlowConversion flow_conversion;
-        if (convert_values_none.contains(flow_conversion_str)) {
-            flow_conversion = shortest_paths::FlowConversion::None;
-        } else if (convert_values_s_over_t.contains(flow_conversion_str)) {
-            flow_conversion = shortest_paths::FlowConversion::SourceOverTarget;
-        } else if (convert_values_t_over_s.contains(flow_conversion_str)) {
-            flow_conversion = shortest_paths::FlowConversion::TargetOverSource;
-        } else {
-            throw mgp::ValueException(fmt::format(
-                "Invalid flow conversion '{}', should be one of: 'none', 'target/source', 'source/target'", flow_conversion_str
-            ));
-        }
-
-        if (flow_in < epsilon) {
-            return;
-        }
-
-        auto graph_view_ptr = GetGraphViewAdjusted<uint64_t>(
-            graph,
-            weight_property, default_weight,
-            fixed_cost_property, default_fixed_cost,
-            flow_in, StringToWeightTransform(weight_transform_str)
-        );
-        const mg_graph::GraphView<>& graph_view = *graph_view_ptr;
-
-        std::vector<double> capacities = GetScores(graph, graph_view, capacity_property, default_capacity, false);
-        std::vector<double> factors = GetScores(graph, graph_view, factor_property, default_factor, true); // default to weights
-
-        const auto source_mgid = source_node.Id().AsUint();
-        const auto target_mgid = target_node.Id().AsUint();
-        const auto maybe_source_id = GetInnerNodeIdOpt(graph_view, source_mgid);
-        const auto maybe_target_id = GetInnerNodeIdOpt(graph_view, target_mgid);
-        if (!maybe_source_id || !maybe_target_id) {
-            // Either source or target is not in subgraph, so there can be no paths between them.
-            return;
-        }
-        const auto source_id = maybe_source_id.value();
-        const auto target_id = maybe_target_id.value();
-        auto abort_func = [&graph] () { graph.CheckMustAbort(); };
-
-        shortest_paths::SuccessiveShortestPathsPathfinder<uint64_t> pathfinder;
-        auto paths = pathfinder.search(
-            graph_view, source_id, target_id, flow_in,
-            capacities, factors,
-            epsilon, flow_conversion,
-            abort_func
-        );
-
-        int64_t index = 0;
-        for (const auto& [path, flows] : paths) {
-            auto result_path = TranslatePath(graph, graph_view, path);
-            auto costs = ToList(path.costs);
-            auto flows_list = ToList(flows);
-
-            auto record = record_factory.NewRecord();
-            record.Insert(RECORD_NAME(shortest_paths::kReturnIndex), index++);
-            record.Insert(RECORD_NAME(shortest_paths::kReturnSourceNode), source_node);
-            record.Insert(RECORD_NAME(shortest_paths::kReturnTargetNode), target_node);
-            record.Insert(RECORD_NAME(shortest_paths::kReturnTotalCost), path.total_cost);
-            record.Insert(RECORD_NAME(shortest_paths::kReturnCosts), costs);
-            record.Insert(RECORD_NAME(shortest_paths::kReturnPathInputFlow), flows[0]);
-            record.Insert(RECORD_NAME(shortest_paths::kReturnFlows), flows_list);
-            record.Insert(RECORD_NAME(shortest_paths::kReturnPath), result_path);
-        }
-    } catch (const std::exception& e) {
-        record_factory.SetErrorMessage(e.what());
-        return;
+    shortest_paths::FlowConversion flow_conversion;
+    if (convert_values_none.contains(flow_conversion_str)) {
+      flow_conversion = shortest_paths::FlowConversion::None;
+    } else if (convert_values_s_over_t.contains(flow_conversion_str)) {
+      flow_conversion = shortest_paths::FlowConversion::SourceOverTarget;
+    } else if (convert_values_t_over_s.contains(flow_conversion_str)) {
+      flow_conversion = shortest_paths::FlowConversion::TargetOverSource;
+    } else {
+      throw mgp::ValueException(
+          fmt::format("Invalid flow conversion '{}', should be one of: 'none', 'target/source', 'source/target'",
+                      flow_conversion_str));
     }
+
+    if (flow_in < epsilon) {
+      return;
+    }
+
+    auto graph_view_ptr =
+        GetGraphViewAdjusted<uint64_t>(graph, weight_property, default_weight, fixed_cost_property, default_fixed_cost,
+                                       flow_in, StringToWeightTransform(weight_transform_str));
+    const mg_graph::GraphView<> &graph_view = *graph_view_ptr;
+
+    std::vector<double> capacities = GetScores(graph, graph_view, capacity_property, default_capacity, false);
+    std::vector<double> factors =
+        GetScores(graph, graph_view, factor_property, default_factor, true);  // default to weights
+
+    const auto source_mgid = source_node.Id().AsUint();
+    const auto target_mgid = target_node.Id().AsUint();
+    const auto maybe_source_id = GetInnerNodeIdOpt(graph_view, source_mgid);
+    const auto maybe_target_id = GetInnerNodeIdOpt(graph_view, target_mgid);
+    if (!maybe_source_id || !maybe_target_id) {
+      // Either source or target is not in subgraph, so there can be no paths between them.
+      return;
+    }
+    const auto source_id = maybe_source_id.value();
+    const auto target_id = maybe_target_id.value();
+    auto abort_func = [&graph]() { graph.CheckMustAbort(); };
+
+    shortest_paths::SuccessiveShortestPathsPathfinder<uint64_t> pathfinder;
+    auto paths = pathfinder.search(graph_view, source_id, target_id, flow_in, capacities, factors, epsilon,
+                                   flow_conversion, abort_func);
+
+    int64_t index = 0;
+    for (const auto &[path, flows] : paths) {
+      auto result_path = TranslatePath(graph, graph_view, path);
+      auto costs = ToList(path.costs);
+      auto flows_list = ToList(flows);
+
+      auto record = record_factory.NewRecord();
+      record.Insert(RECORD_NAME(shortest_paths::kReturnIndex), index++);
+      record.Insert(RECORD_NAME(shortest_paths::kReturnSourceNode), source_node);
+      record.Insert(RECORD_NAME(shortest_paths::kReturnTargetNode), target_node);
+      record.Insert(RECORD_NAME(shortest_paths::kReturnTotalCost), path.total_cost);
+      record.Insert(RECORD_NAME(shortest_paths::kReturnCosts), costs);
+      record.Insert(RECORD_NAME(shortest_paths::kReturnPathInputFlow), flows[0]);
+      record.Insert(RECORD_NAME(shortest_paths::kReturnFlows), flows_list);
+      record.Insert(RECORD_NAME(shortest_paths::kReturnPath), result_path);
+    }
+  } catch (const std::exception &e) {
+    record_factory.SetErrorMessage(e.what());
+    return;
+  }
 }
 
-} // namespace
+void OptimizeFlowsProc(mgp_list *args, mgp_graph *memgraph_graph, mgp_result *result, mgp_memory *memory) {
+  // Indicies in the arguments list for parameters
+  enum ArgIdx : size_t { Paths, FlowIn, XCoordProp, YCoordProp, Options };
 
-extern "C" int mgp_init_module(struct mgp_module *module, struct mgp_memory *memory) {
-    try {
-        mgp::MemoryDispatcherGuard mem_guard(memory);
+  mgp::MemoryDispatcherGuard mem_guard(memory);
+  mgp::Graph graph{memgraph_graph};
 
-        auto return_costs_type = std::make_pair(mgp::Type::List, mgp::Type::Double);
-        mgp::Value empty_list(mgp::List{});
-        mgp::Value empty_map(mgp::Map{});
+  const auto arguments = mgp::List(args);
+  const auto record_factory = mgp::RecordFactory(result);
+  try {
+    const auto paths_list = arguments[ArgIdx::Paths].ValueList();
+    const auto flow_in = arguments[ArgIdx::FlowIn].ValueNumeric();
+    const auto xcoord_prop_name = std::string(arguments[ArgIdx::XCoordProp].ValueString());
+    const auto ycoord_prop_name = std::string(arguments[ArgIdx::YCoordProp].ValueString());
+    const sp::util::Options options(arguments[ArgIdx::Options].ValueMap());
 
-        mgp::AddProcedure(
-            YensKShortestPaths, shortest_paths::kProcedureYens, mgp::ProcedureType::Read,
-            {
-                mgp::Parameter(shortest_paths::kArgumentSourceNode, mgp::Type::Node),
-                mgp::Parameter(shortest_paths::kArgumentTargetNode, mgp::Type::Node),
-                mgp::Parameter(shortest_paths::kArgumentK, mgp::Type::Int, 1L),
-                mgp::Parameter(shortest_paths::kArgumentRelationshipWeightProperty, mgp::Type::String, ""),
-                mgp::Parameter(shortest_paths::kArgumentDefaultWeight, mgp::Type::Double, 1.0),
-                mgp::Parameter(shortest_paths::kArgumentThreads, mgp::Type::Int, 0L),
-            },
-            {
-                mgp::Return(shortest_paths::kReturnIndex, mgp::Type::Int),
-                mgp::Return(shortest_paths::kReturnSourceNode, mgp::Type::Node),
-                mgp::Return(shortest_paths::kReturnTargetNode, mgp::Type::Node),
-                mgp::Return(shortest_paths::kReturnTotalCost, mgp::Type::Double),
-                mgp::Return(shortest_paths::kReturnCosts, return_costs_type),
-                mgp::Return(shortest_paths::kReturnPath, mgp::Type::Path)
-            },
-            module, memory
-        );
+    const auto initial_allocations = options.NumericList(sp::kArgumentInitialAllocations);
+    const auto initial_allocation_ratios = options.Bool(sp::kArgumentInitialAllocationAreRatios).value_or(false);
+    const auto ftol = options.Numeric(sp::kArgumentFtol).value_or(1.0e-6);
+    const auto ptol = options.Numeric(sp::kArgumentPtol).value_or(1.0e-6);
+    const auto xtol = options.Numeric(sp::kArgumentXtol).value_or(1.0e-4);
+    const auto max_iter = options.Integer(sp::kArgumentMaxIter).value_or(50);
+    const auto fit_2point_quadratic = options.Bool(sp::kArgumentFit2PointQuadratic).value_or(false);
 
-        mgp::AddProcedure(
-            BellmanFordProcedure, shortest_paths::kProcedureBellmanFord, mgp::ProcedureType::Read,
-            {
-                mgp::Parameter(shortest_paths::kArgumentSourceNode, mgp::Type::Node),
-                mgp::Parameter(shortest_paths::kArgumentTargetNodes, {mgp::Type::List, mgp::Type::Node}, empty_list),
-                mgp::Parameter(shortest_paths::kArgumentRelationshipWeightProperty, mgp::Type::String, ""),
-                mgp::Parameter(shortest_paths::kArgumentDefaultWeight, mgp::Type::Double, 1.0)
-            },
-            {
-                mgp::Return(shortest_paths::kReturnNegativeCycle, mgp::Type::Bool),
-                mgp::Return(shortest_paths::kReturnSourceNode, mgp::Type::Node),
-                mgp::Return(shortest_paths::kReturnTargetNode, mgp::Type::Node),
-                mgp::Return(shortest_paths::kReturnTotalCost, mgp::Type::Double),
-                mgp::Return(shortest_paths::kReturnCosts, return_costs_type),
-                mgp::Return(shortest_paths::kReturnPath, mgp::Type::Path)
-            },
-            module, memory
-        );
-
-        mgp::AddProcedure(
-            IterativeBellmanFordProcedure, shortest_paths::kProcedureIterativeBellmanFordTargeted, mgp::ProcedureType::Read,
-            {
-                mgp::Parameter(shortest_paths::kArgumentSourceNode, mgp::Type::Node),
-                mgp::Parameter(shortest_paths::kArgumentTargetNode, mgp::Type::Node),
-                mgp::Parameter(shortest_paths::kArgumentRelationshipWeightProperty, mgp::Type::String, ""),
-                mgp::Parameter(shortest_paths::kArgumentRelationshipScoreProperty, mgp::Type::String, ""),
-                mgp::Parameter(shortest_paths::kArgumentDefaultWeight, mgp::Type::Double, 1.0),
-                mgp::Parameter(shortest_paths::kArgumentDefaultScore, mgp::Type::Double, 1.0),
-                mgp::Parameter(shortest_paths::kArgumentCullAscending, mgp::Type::Bool, true)
-            },
-            {
-                mgp::Return(shortest_paths::kReturnSourceNode, mgp::Type::Node),
-                mgp::Return(shortest_paths::kReturnTargetNode, mgp::Type::Node),
-                mgp::Return(shortest_paths::kReturnTotalCost, mgp::Type::Double),
-                mgp::Return(shortest_paths::kReturnCosts, return_costs_type),
-                mgp::Return(shortest_paths::kReturnNumEdgesRemoved, mgp::Type::Int),
-                mgp::Return(shortest_paths::kReturnPath, mgp::Type::Path)
-            },
-            module, memory
-        );
-
-        mgp::AddProcedure(
-            IBF_SSSP, shortest_paths::kProcedureIterativeBellmanFordSssp, mgp::ProcedureType::Read,
-            {
-                mgp::Parameter(shortest_paths::kArgumentSourceNode, mgp::Type::Node),
-                mgp::Parameter(shortest_paths::kArgumentTargetNodes, {mgp::Type::List, mgp::Type::Node}, empty_list),
-                mgp::Parameter(shortest_paths::kArgumentRelationshipWeightProperty, mgp::Type::String, ""),
-                mgp::Parameter(shortest_paths::kArgumentRelationshipScoreProperty, mgp::Type::String, ""),
-                mgp::Parameter(shortest_paths::kArgumentDefaultWeight, mgp::Type::Double, 1.0),
-                mgp::Parameter(shortest_paths::kArgumentDefaultScore, mgp::Type::Double, 1.0),
-                mgp::Parameter(shortest_paths::kArgumentCullAscending, mgp::Type::Bool, true)
-            },
-            {
-                mgp::Return(shortest_paths::kReturnSourceNode, mgp::Type::Node),
-                mgp::Return(shortest_paths::kReturnTargetNode, mgp::Type::Node),
-                mgp::Return(shortest_paths::kReturnTotalCost, mgp::Type::Double),
-                mgp::Return(shortest_paths::kReturnCosts, return_costs_type),
-                mgp::Return(shortest_paths::kReturnPath, mgp::Type::Path)
-            },
-            module, memory
-        );
-
-        mgp::AddProcedure(
-            IBF_SSSP_Subgraph, shortest_paths::kProcedureIterativeBellmanFordSubgraph, mgp::ProcedureType::Read,
-            {
-                mgp::Parameter(shortest_paths::kArgumentSourceNode, mgp::Type::Node),
-                mgp::Parameter(shortest_paths::kArgumentRelationshipWeightProperty, mgp::Type::String, ""),
-                mgp::Parameter(shortest_paths::kArgumentRelationshipScoreProperty, mgp::Type::String, ""),
-                mgp::Parameter(shortest_paths::kArgumentDefaultWeight, mgp::Type::Double, 1.0),
-                mgp::Parameter(shortest_paths::kArgumentDefaultScore, mgp::Type::Double, 1.0),
-                mgp::Parameter(shortest_paths::kArgumentCullAscending, mgp::Type::Bool, true)
-            },
-            {
-                mgp::Return(shortest_paths::kReturnNodes, {mgp::Type::List, mgp::Type::Node}),
-                mgp::Return(shortest_paths::kReturnEdges, {mgp::Type::List, mgp::Type::Relationship}),
-                mgp::Return(shortest_paths::kReturnNumEdgesRemoved, mgp::Type::Int),
-                mgp::Return(shortest_paths::kReturnRemovedEdges, {mgp::Type::List, mgp::Type::Relationship}),
-            },
-            module, memory
-        );
-
-        mgp::AddProcedure(
-            Johnsons_Subgraph, shortest_paths::kProcedureJohnsonsSubgraph, mgp::ProcedureType::Read,
-            {
-                mgp::Parameter(shortest_paths::kArgumentRelationshipWeightProperty, mgp::Type::String, ""),
-                mgp::Parameter(shortest_paths::kArgumentRelationshipScoreProperty, mgp::Type::String, ""),
-                mgp::Parameter(shortest_paths::kArgumentDefaultWeight, mgp::Type::Double, 1.0),
-                mgp::Parameter(shortest_paths::kArgumentDefaultScore, mgp::Type::Double, 1.0),
-                mgp::Parameter(shortest_paths::kArgumentCullAscending, mgp::Type::Bool, true),
-                mgp::Parameter(shortest_paths::kArgumentThreads, mgp::Type::Int, 0L)
-            }, {
-                mgp::Return(shortest_paths::kReturnNegativeCycle, mgp::Type::Bool),
-                mgp::Return(shortest_paths::kReturnNodes, {mgp::Type::List, mgp::Type::Node}),
-                mgp::Return(shortest_paths::kReturnEdges, {mgp::Type::List, mgp::Type::Relationship}),
-                mgp::Return(shortest_paths::kReturnNodeWeights, {mgp::Type::List, mgp::Type::Double}),
-                mgp::Return(shortest_paths::kReturnEdgeWeights, {mgp::Type::List, mgp::Type::Double}),
-                mgp::Return(shortest_paths::kReturnNumEdgesRemoved, mgp::Type::Int),
-                mgp::Return(shortest_paths::kReturnRemovedEdges, {mgp::Type::List, mgp::Type::Relationship}),
-            },
-            module, memory
-        );
-
-        mgp::AddProcedure(
-            Johnsons_Source_Subgraphs, shortest_paths::kProcedureJohnsonsSourceSubgraphs, mgp::ProcedureType::Read,
-            {
-                mgp::Parameter(shortest_paths::kArgumentSourceNodes, {mgp::Type::List, mgp::Type::Node}, empty_list),
-                mgp::Parameter(shortest_paths::kArgumentRelationshipWeightProperty, mgp::Type::String, ""),
-                mgp::Parameter(shortest_paths::kArgumentRelationshipScoreProperty, mgp::Type::String, ""),
-                mgp::Parameter(shortest_paths::kArgumentDefaultWeight, mgp::Type::Double, 1.0),
-                mgp::Parameter(shortest_paths::kArgumentDefaultScore, mgp::Type::Double, 1.0),
-                mgp::Parameter(shortest_paths::kArgumentCullAscending, mgp::Type::Bool, true),
-                mgp::Parameter(shortest_paths::kArgumentThreads, mgp::Type::Int, 0L)
-            }, {
-                mgp::Return(shortest_paths::kReturnNegativeCycle, mgp::Type::Bool),
-                mgp::Return(shortest_paths::kReturnSourceNode, mgp::Type::Node),
-                mgp::Return(shortest_paths::kReturnNodes, {mgp::Type::List, mgp::Type::Node}),
-                mgp::Return(shortest_paths::kReturnEdges, {mgp::Type::List, mgp::Type::Relationship}),
-                mgp::Return(shortest_paths::kReturnCosts, {mgp::Type::List, mgp::Type::Double})
-            },
-            module, memory
-        );
-
-        mgp::AddProcedure(
-            Johnsons_Paths, shortest_paths::kProcedureJohnsonsPaths, mgp::ProcedureType::Read,
-            {
-                mgp::Parameter(shortest_paths::kArgumentSourceNodes, {mgp::Type::List, mgp::Type::Node}, empty_list),
-                mgp::Parameter(shortest_paths::kArgumentTargetNodes, {mgp::Type::List, mgp::Type::Node}, empty_list),
-                mgp::Parameter(shortest_paths::kArgumentRelationshipWeightProperty, mgp::Type::String, ""),
-                mgp::Parameter(shortest_paths::kArgumentRelationshipScoreProperty, mgp::Type::String, ""),
-                mgp::Parameter(shortest_paths::kArgumentDefaultWeight, mgp::Type::Double, 1.0),
-                mgp::Parameter(shortest_paths::kArgumentDefaultScore, mgp::Type::Double, 1.0),
-                mgp::Parameter(shortest_paths::kArgumentCullAscending, mgp::Type::Bool, true),
-                mgp::Parameter(shortest_paths::kArgumentThreads, mgp::Type::Int, 0L)
-            }, {
-                mgp::Return(shortest_paths::kReturnNegativeCycle, mgp::Type::Bool),
-                mgp::Return(shortest_paths::kReturnSourceNode, mgp::Type::Node),
-                mgp::Return(shortest_paths::kReturnTargetNode, mgp::Type::Node),
-                mgp::Return(shortest_paths::kReturnTotalCost, mgp::Type::Double),
-                mgp::Return(shortest_paths::kReturnCosts, return_costs_type),
-                mgp::Return(shortest_paths::kReturnPath, mgp::Type::Path)
-            },
-            module, memory
-        );
-
-        mgp::AddProcedure(
-            Johnsons_K_Shortest, shortest_paths::kProcedureJohnsonsKShortest, mgp::ProcedureType::Read,
-            {
-                mgp::Parameter(shortest_paths::kArgumentSourceNode, mgp::Type::Node),
-                mgp::Parameter(shortest_paths::kArgumentTargetNode, mgp::Type::Node),
-                mgp::Parameter(shortest_paths::kArgumentK, mgp::Type::Int, 1L),
-                mgp::Parameter(shortest_paths::kArgumentRelationshipWeightProperty, mgp::Type::String, ""),
-                mgp::Parameter(shortest_paths::kArgumentRelationshipScoreProperty, mgp::Type::String, ""),
-                mgp::Parameter(shortest_paths::kArgumentDefaultWeight, mgp::Type::Double, 1.0),
-                mgp::Parameter(shortest_paths::kArgumentDefaultScore, mgp::Type::Double, 1.0),
-                mgp::Parameter(shortest_paths::kArgumentCullAscending, mgp::Type::Bool, true),
-                mgp::Parameter(shortest_paths::kArgumentThreads, mgp::Type::Int, 0L)
-            }, {
-                mgp::Return(shortest_paths::kReturnNegativeCycle, mgp::Type::Bool),
-                mgp::Return(shortest_paths::kReturnIndex, mgp::Type::Int),
-                mgp::Return(shortest_paths::kReturnSourceNode, mgp::Type::Node),
-                mgp::Return(shortest_paths::kReturnTargetNode, mgp::Type::Node),
-                mgp::Return(shortest_paths::kReturnTotalCost, mgp::Type::Double),
-                mgp::Return(shortest_paths::kReturnCosts, return_costs_type),
-                mgp::Return(shortest_paths::kReturnPath, mgp::Type::Path)
-            },
-            module, memory
-        );
-
-        mgp::AddProcedure(
-            Johnsons_Disjoint_K_Shortest, shortest_paths::kProcedureJohnsonsDisjointKShortest, mgp::ProcedureType::Read,
-            {
-                mgp::Parameter(shortest_paths::kArgumentSourceNode, mgp::Type::Node),
-                mgp::Parameter(shortest_paths::kArgumentTargetNode, mgp::Type::Node),
-                mgp::Parameter(shortest_paths::kArgumentK, mgp::Type::Int, 0L),
-                mgp::Parameter(shortest_paths::kArgumentRelationshipWeightProperty, mgp::Type::String, ""),
-                mgp::Parameter(shortest_paths::kArgumentRelationshipScoreProperty, mgp::Type::String, ""),
-                mgp::Parameter(shortest_paths::kArgumentDefaultWeight, mgp::Type::Double, 1.0),
-                mgp::Parameter(shortest_paths::kArgumentDefaultScore, mgp::Type::Double, 1.0),
-                mgp::Parameter(shortest_paths::kArgumentCullAscending, mgp::Type::Bool, true)
-            }, {
-                mgp::Return(shortest_paths::kReturnNegativeCycle, mgp::Type::Bool),
-                mgp::Return(shortest_paths::kReturnIndex, mgp::Type::Int),
-                mgp::Return(shortest_paths::kReturnSourceNode, mgp::Type::Node),
-                mgp::Return(shortest_paths::kReturnTargetNode, mgp::Type::Node),
-                mgp::Return(shortest_paths::kReturnTotalCost, mgp::Type::Double),
-                mgp::Return(shortest_paths::kReturnCosts, return_costs_type),
-                mgp::Return(shortest_paths::kReturnPath, mgp::Type::Path)
-            },
-            module, memory
-        );
-
-        mgp::AddProcedure(
-            DisjointKShortestPaths, shortest_paths::kProcedureDisjointKShortest, mgp::ProcedureType::Read,
-            {
-                mgp::Parameter(shortest_paths::kArgumentSourceNode, mgp::Type::Node),
-                mgp::Parameter(shortest_paths::kArgumentTargetNode, mgp::Type::Node),
-                mgp::Parameter(shortest_paths::kArgumentK, mgp::Type::Int, 0L),
-                mgp::Parameter(shortest_paths::kArgumentRelationshipWeightProperty, mgp::Type::String, ""),
-                mgp::Parameter(shortest_paths::kArgumentRelationshipScoreProperty, mgp::Type::String, ""),
-                mgp::Parameter(shortest_paths::kArgumentDefaultWeight, mgp::Type::Double, 1.0),
-                mgp::Parameter(shortest_paths::kArgumentDefaultScore, mgp::Type::Double, 1.0),
-                mgp::Parameter(shortest_paths::kArgumentCullPerRound, mgp::Type::Int, 1L),
-                mgp::Parameter(shortest_paths::kArgumentCullAscending, mgp::Type::Bool, true),
-                mgp::Parameter(shortest_paths::kArgumentRelationshipFixedCostProperty, mgp::Type::String, ""),
-                mgp::Parameter(shortest_paths::kArgumentDefaultFixedCost, mgp::Type::Double, 0.0),
-                mgp::Parameter(shortest_paths::kArgumentFlowIn, mgp::Type::Double, 0.0),
-                mgp::Parameter(shortest_paths::kArgumentWeightTransform, mgp::Type::String, "")
-            },
-            {
-                mgp::Return(shortest_paths::kReturnIndex, mgp::Type::Int),
-                mgp::Return(shortest_paths::kReturnSourceNode, mgp::Type::Node),
-                mgp::Return(shortest_paths::kReturnTargetNode, mgp::Type::Node),
-                mgp::Return(shortest_paths::kReturnTotalCost, mgp::Type::Double),
-                mgp::Return(shortest_paths::kReturnCosts, return_costs_type),
-                mgp::Return(shortest_paths::kReturnPath, mgp::Type::Path)
-            },
-            module, memory
-        );
-
-        mgp::Map ssp_defaults {
-            {shortest_paths::kArgumentRelationshipWeightProperty, mgp::Value("")},
-            {shortest_paths::kArgumentRelationshipCapacityProperty, mgp::Value("")},
-            {shortest_paths::kArgumentRelationshipFactorProperty, mgp::Value("")},
-            {shortest_paths::kArgumentDefaultWeight, mgp::Value(1.0)},
-            {shortest_paths::kArgumentDefaultCapacity, mgp::Value(0.0)},
-            {shortest_paths::kArgumentDefaultFactor, mgp::Value(1.0)},
-            {shortest_paths::kArgumentFlowConversion, mgp::Value("")},
-            {shortest_paths::kArgumentEpsilon, mgp::Value(1.0e-6)},
-            {shortest_paths::kArgumentRelationshipFixedCostProperty, mgp::Value("")},
-            {shortest_paths::kArgumentDefaultFixedCost, mgp::Value(0.0)},
-            {shortest_paths::kArgumentFlowIn, mgp::Value(0.0)},
-            {shortest_paths::kArgumentWeightTransform, mgp::Value("")}
-        };
-
-        mgp::AddProcedure(
-            SuccessiveShortestPaths, shortest_paths::kProcedureSuccessiveShortestPaths, mgp::ProcedureType::Read,
-            {
-                mgp::Parameter(shortest_paths::kArgumentSourceNode, mgp::Type::Node),
-                mgp::Parameter(shortest_paths::kArgumentTargetNode, mgp::Type::Node),
-                mgp::Parameter(shortest_paths::kArgumentFlowIn, mgp::Type::Double),
-                mgp::Parameter(shortest_paths::kArgumentOptions, mgp::Type::Map, mgp::Value(ssp_defaults))
-            },
-            {
-                mgp::Return(shortest_paths::kReturnIndex, mgp::Type::Int),
-                mgp::Return(shortest_paths::kReturnSourceNode, mgp::Type::Node),
-                mgp::Return(shortest_paths::kReturnTargetNode, mgp::Type::Node),
-                mgp::Return(shortest_paths::kReturnTotalCost, mgp::Type::Double),
-                mgp::Return(shortest_paths::kReturnCosts, return_costs_type),
-                mgp::Return(shortest_paths::kReturnPathInputFlow, mgp::Type::Double),
-                mgp::Return(shortest_paths::kReturnFlows, return_costs_type),
-                mgp::Return(shortest_paths::kReturnPath, mgp::Type::Path)
-            },
-            module, memory
-        );
-
-    } catch (const std::exception& e) {
-        return 1;
+    std::vector<mgp::Path> paths_vec;
+    for (const auto &value : paths_list) {
+      paths_vec.push_back(value.ValuePath());
     }
 
-    return 0;
+    auto edge_network =
+        sp::util::EdgeNetworkFromMemgraph(graph, paths_vec, xcoord_prop_name, ycoord_prop_name, fit_2point_quadratic);
+
+    auto result = sp::OptimizeFlows(edge_network, flow_in, initial_allocations, initial_allocation_ratios, ftol, ptol,
+                                    xtol, max_iter);
+    if (not result.success) {
+      record_factory.SetErrorMessage("Optimization failed to find a valid solution");
+      return;
+    }
+
+    auto record = record_factory.NewRecord();
+    record.Insert(RECORD_NAME(sp::kReturnFlows), ToList(result.input_amounts));
+    record.Insert(RECORD_NAME(sp::kReturnFlowRatios), ToList(result.input_ratios));
+    record.Insert(RECORD_NAME(sp::kReturnExceptedOutputFlow), result.expected_output);
+  } catch (const std::exception &e) {
+    record_factory.SetErrorMessage(e.what());
+    return;
+  }
+}
+
+}  // namespace
+
+extern "C" int mgp_init_module(struct mgp_module *module, struct mgp_memory *memory) {
+  try {
+    mgp::MemoryDispatcherGuard mem_guard(memory);
+
+    auto return_costs_type = std::make_pair(mgp::Type::List, mgp::Type::Double);
+    mgp::Value empty_list(mgp::List{});
+    mgp::Value empty_map(mgp::Map{});
+
+    mgp::AddProcedure(YensKShortestPaths, shortest_paths::kProcedureYens, mgp::ProcedureType::Read,
+                      {
+                          mgp::Parameter(shortest_paths::kArgumentSourceNode, mgp::Type::Node),
+                          mgp::Parameter(shortest_paths::kArgumentTargetNode, mgp::Type::Node),
+                          mgp::Parameter(shortest_paths::kArgumentK, mgp::Type::Int, 1L),
+                          mgp::Parameter(shortest_paths::kArgumentRelationshipWeightProperty, mgp::Type::String, ""),
+                          mgp::Parameter(shortest_paths::kArgumentDefaultWeight, mgp::Type::Double, 1.0),
+                          mgp::Parameter(shortest_paths::kArgumentThreads, mgp::Type::Int, 0L),
+                      },
+                      {mgp::Return(shortest_paths::kReturnIndex, mgp::Type::Int),
+                       mgp::Return(shortest_paths::kReturnSourceNode, mgp::Type::Node),
+                       mgp::Return(shortest_paths::kReturnTargetNode, mgp::Type::Node),
+                       mgp::Return(shortest_paths::kReturnTotalCost, mgp::Type::Double),
+                       mgp::Return(shortest_paths::kReturnCosts, return_costs_type),
+                       mgp::Return(shortest_paths::kReturnPath, mgp::Type::Path)},
+                      module, memory);
+
+    mgp::AddProcedure(
+        BellmanFordProcedure, shortest_paths::kProcedureBellmanFord, mgp::ProcedureType::Read,
+        {mgp::Parameter(shortest_paths::kArgumentSourceNode, mgp::Type::Node),
+         mgp::Parameter(shortest_paths::kArgumentTargetNodes, {mgp::Type::List, mgp::Type::Node}, empty_list),
+         mgp::Parameter(shortest_paths::kArgumentRelationshipWeightProperty, mgp::Type::String, ""),
+         mgp::Parameter(shortest_paths::kArgumentDefaultWeight, mgp::Type::Double, 1.0)},
+        {mgp::Return(shortest_paths::kReturnNegativeCycle, mgp::Type::Bool),
+         mgp::Return(shortest_paths::kReturnSourceNode, mgp::Type::Node),
+         mgp::Return(shortest_paths::kReturnTargetNode, mgp::Type::Node),
+         mgp::Return(shortest_paths::kReturnTotalCost, mgp::Type::Double),
+         mgp::Return(shortest_paths::kReturnCosts, return_costs_type),
+         mgp::Return(shortest_paths::kReturnPath, mgp::Type::Path)},
+        module, memory);
+
+    mgp::AddProcedure(IterativeBellmanFordProcedure, shortest_paths::kProcedureIterativeBellmanFordTargeted,
+                      mgp::ProcedureType::Read,
+                      {mgp::Parameter(shortest_paths::kArgumentSourceNode, mgp::Type::Node),
+                       mgp::Parameter(shortest_paths::kArgumentTargetNode, mgp::Type::Node),
+                       mgp::Parameter(shortest_paths::kArgumentRelationshipWeightProperty, mgp::Type::String, ""),
+                       mgp::Parameter(shortest_paths::kArgumentRelationshipScoreProperty, mgp::Type::String, ""),
+                       mgp::Parameter(shortest_paths::kArgumentDefaultWeight, mgp::Type::Double, 1.0),
+                       mgp::Parameter(shortest_paths::kArgumentDefaultScore, mgp::Type::Double, 1.0),
+                       mgp::Parameter(shortest_paths::kArgumentCullAscending, mgp::Type::Bool, true)},
+                      {mgp::Return(shortest_paths::kReturnSourceNode, mgp::Type::Node),
+                       mgp::Return(shortest_paths::kReturnTargetNode, mgp::Type::Node),
+                       mgp::Return(shortest_paths::kReturnTotalCost, mgp::Type::Double),
+                       mgp::Return(shortest_paths::kReturnCosts, return_costs_type),
+                       mgp::Return(shortest_paths::kReturnNumEdgesRemoved, mgp::Type::Int),
+                       mgp::Return(shortest_paths::kReturnPath, mgp::Type::Path)},
+                      module, memory);
+
+    mgp::AddProcedure(
+        IBF_SSSP, shortest_paths::kProcedureIterativeBellmanFordSssp, mgp::ProcedureType::Read,
+        {mgp::Parameter(shortest_paths::kArgumentSourceNode, mgp::Type::Node),
+         mgp::Parameter(shortest_paths::kArgumentTargetNodes, {mgp::Type::List, mgp::Type::Node}, empty_list),
+         mgp::Parameter(shortest_paths::kArgumentRelationshipWeightProperty, mgp::Type::String, ""),
+         mgp::Parameter(shortest_paths::kArgumentRelationshipScoreProperty, mgp::Type::String, ""),
+         mgp::Parameter(shortest_paths::kArgumentDefaultWeight, mgp::Type::Double, 1.0),
+         mgp::Parameter(shortest_paths::kArgumentDefaultScore, mgp::Type::Double, 1.0),
+         mgp::Parameter(shortest_paths::kArgumentCullAscending, mgp::Type::Bool, true)},
+        {mgp::Return(shortest_paths::kReturnSourceNode, mgp::Type::Node),
+         mgp::Return(shortest_paths::kReturnTargetNode, mgp::Type::Node),
+         mgp::Return(shortest_paths::kReturnTotalCost, mgp::Type::Double),
+         mgp::Return(shortest_paths::kReturnCosts, return_costs_type),
+         mgp::Return(shortest_paths::kReturnPath, mgp::Type::Path)},
+        module, memory);
+
+    mgp::AddProcedure(IBF_SSSP_Subgraph, shortest_paths::kProcedureIterativeBellmanFordSubgraph,
+                      mgp::ProcedureType::Read,
+                      {mgp::Parameter(shortest_paths::kArgumentSourceNode, mgp::Type::Node),
+                       mgp::Parameter(shortest_paths::kArgumentRelationshipWeightProperty, mgp::Type::String, ""),
+                       mgp::Parameter(shortest_paths::kArgumentRelationshipScoreProperty, mgp::Type::String, ""),
+                       mgp::Parameter(shortest_paths::kArgumentDefaultWeight, mgp::Type::Double, 1.0),
+                       mgp::Parameter(shortest_paths::kArgumentDefaultScore, mgp::Type::Double, 1.0),
+                       mgp::Parameter(shortest_paths::kArgumentCullAscending, mgp::Type::Bool, true)},
+                      {
+                          mgp::Return(shortest_paths::kReturnNodes, {mgp::Type::List, mgp::Type::Node}),
+                          mgp::Return(shortest_paths::kReturnEdges, {mgp::Type::List, mgp::Type::Relationship}),
+                          mgp::Return(shortest_paths::kReturnNumEdgesRemoved, mgp::Type::Int),
+                          mgp::Return(shortest_paths::kReturnRemovedEdges, {mgp::Type::List, mgp::Type::Relationship}),
+                      },
+                      module, memory);
+
+    mgp::AddProcedure(Johnsons_Subgraph, shortest_paths::kProcedureJohnsonsSubgraph, mgp::ProcedureType::Read,
+                      {mgp::Parameter(shortest_paths::kArgumentRelationshipWeightProperty, mgp::Type::String, ""),
+                       mgp::Parameter(shortest_paths::kArgumentRelationshipScoreProperty, mgp::Type::String, ""),
+                       mgp::Parameter(shortest_paths::kArgumentDefaultWeight, mgp::Type::Double, 1.0),
+                       mgp::Parameter(shortest_paths::kArgumentDefaultScore, mgp::Type::Double, 1.0),
+                       mgp::Parameter(shortest_paths::kArgumentCullAscending, mgp::Type::Bool, true),
+                       mgp::Parameter(shortest_paths::kArgumentThreads, mgp::Type::Int, 0L)},
+                      {
+                          mgp::Return(shortest_paths::kReturnNegativeCycle, mgp::Type::Bool),
+                          mgp::Return(shortest_paths::kReturnNodes, {mgp::Type::List, mgp::Type::Node}),
+                          mgp::Return(shortest_paths::kReturnEdges, {mgp::Type::List, mgp::Type::Relationship}),
+                          mgp::Return(shortest_paths::kReturnNodeWeights, {mgp::Type::List, mgp::Type::Double}),
+                          mgp::Return(shortest_paths::kReturnEdgeWeights, {mgp::Type::List, mgp::Type::Double}),
+                          mgp::Return(shortest_paths::kReturnNumEdgesRemoved, mgp::Type::Int),
+                          mgp::Return(shortest_paths::kReturnRemovedEdges, {mgp::Type::List, mgp::Type::Relationship}),
+                      },
+                      module, memory);
+
+    mgp::AddProcedure(
+        Johnsons_Source_Subgraphs, shortest_paths::kProcedureJohnsonsSourceSubgraphs, mgp::ProcedureType::Read,
+        {mgp::Parameter(shortest_paths::kArgumentSourceNodes, {mgp::Type::List, mgp::Type::Node}, empty_list),
+         mgp::Parameter(shortest_paths::kArgumentRelationshipWeightProperty, mgp::Type::String, ""),
+         mgp::Parameter(shortest_paths::kArgumentRelationshipScoreProperty, mgp::Type::String, ""),
+         mgp::Parameter(shortest_paths::kArgumentDefaultWeight, mgp::Type::Double, 1.0),
+         mgp::Parameter(shortest_paths::kArgumentDefaultScore, mgp::Type::Double, 1.0),
+         mgp::Parameter(shortest_paths::kArgumentCullAscending, mgp::Type::Bool, true),
+         mgp::Parameter(shortest_paths::kArgumentThreads, mgp::Type::Int, 0L)},
+        {mgp::Return(shortest_paths::kReturnNegativeCycle, mgp::Type::Bool),
+         mgp::Return(shortest_paths::kReturnSourceNode, mgp::Type::Node),
+         mgp::Return(shortest_paths::kReturnNodes, {mgp::Type::List, mgp::Type::Node}),
+         mgp::Return(shortest_paths::kReturnEdges, {mgp::Type::List, mgp::Type::Relationship}),
+         mgp::Return(shortest_paths::kReturnCosts, {mgp::Type::List, mgp::Type::Double})},
+        module, memory);
+
+    mgp::AddProcedure(
+        Johnsons_Paths, shortest_paths::kProcedureJohnsonsPaths, mgp::ProcedureType::Read,
+        {mgp::Parameter(shortest_paths::kArgumentSourceNodes, {mgp::Type::List, mgp::Type::Node}, empty_list),
+         mgp::Parameter(shortest_paths::kArgumentTargetNodes, {mgp::Type::List, mgp::Type::Node}, empty_list),
+         mgp::Parameter(shortest_paths::kArgumentRelationshipWeightProperty, mgp::Type::String, ""),
+         mgp::Parameter(shortest_paths::kArgumentRelationshipScoreProperty, mgp::Type::String, ""),
+         mgp::Parameter(shortest_paths::kArgumentDefaultWeight, mgp::Type::Double, 1.0),
+         mgp::Parameter(shortest_paths::kArgumentDefaultScore, mgp::Type::Double, 1.0),
+         mgp::Parameter(shortest_paths::kArgumentCullAscending, mgp::Type::Bool, true),
+         mgp::Parameter(shortest_paths::kArgumentThreads, mgp::Type::Int, 0L)},
+        {mgp::Return(shortest_paths::kReturnNegativeCycle, mgp::Type::Bool),
+         mgp::Return(shortest_paths::kReturnSourceNode, mgp::Type::Node),
+         mgp::Return(shortest_paths::kReturnTargetNode, mgp::Type::Node),
+         mgp::Return(shortest_paths::kReturnTotalCost, mgp::Type::Double),
+         mgp::Return(shortest_paths::kReturnCosts, return_costs_type),
+         mgp::Return(shortest_paths::kReturnPath, mgp::Type::Path)},
+        module, memory);
+
+    mgp::AddProcedure(Johnsons_K_Shortest, shortest_paths::kProcedureJohnsonsKShortest, mgp::ProcedureType::Read,
+                      {mgp::Parameter(shortest_paths::kArgumentSourceNode, mgp::Type::Node),
+                       mgp::Parameter(shortest_paths::kArgumentTargetNode, mgp::Type::Node),
+                       mgp::Parameter(shortest_paths::kArgumentK, mgp::Type::Int, 1L),
+                       mgp::Parameter(shortest_paths::kArgumentRelationshipWeightProperty, mgp::Type::String, ""),
+                       mgp::Parameter(shortest_paths::kArgumentRelationshipScoreProperty, mgp::Type::String, ""),
+                       mgp::Parameter(shortest_paths::kArgumentDefaultWeight, mgp::Type::Double, 1.0),
+                       mgp::Parameter(shortest_paths::kArgumentDefaultScore, mgp::Type::Double, 1.0),
+                       mgp::Parameter(shortest_paths::kArgumentCullAscending, mgp::Type::Bool, true),
+                       mgp::Parameter(shortest_paths::kArgumentThreads, mgp::Type::Int, 0L)},
+                      {mgp::Return(shortest_paths::kReturnNegativeCycle, mgp::Type::Bool),
+                       mgp::Return(shortest_paths::kReturnIndex, mgp::Type::Int),
+                       mgp::Return(shortest_paths::kReturnSourceNode, mgp::Type::Node),
+                       mgp::Return(shortest_paths::kReturnTargetNode, mgp::Type::Node),
+                       mgp::Return(shortest_paths::kReturnTotalCost, mgp::Type::Double),
+                       mgp::Return(shortest_paths::kReturnCosts, return_costs_type),
+                       mgp::Return(shortest_paths::kReturnPath, mgp::Type::Path)},
+                      module, memory);
+
+    mgp::AddProcedure(Johnsons_Disjoint_K_Shortest, shortest_paths::kProcedureJohnsonsDisjointKShortest,
+                      mgp::ProcedureType::Read,
+                      {mgp::Parameter(shortest_paths::kArgumentSourceNode, mgp::Type::Node),
+                       mgp::Parameter(shortest_paths::kArgumentTargetNode, mgp::Type::Node),
+                       mgp::Parameter(shortest_paths::kArgumentK, mgp::Type::Int, 0L),
+                       mgp::Parameter(shortest_paths::kArgumentRelationshipWeightProperty, mgp::Type::String, ""),
+                       mgp::Parameter(shortest_paths::kArgumentRelationshipScoreProperty, mgp::Type::String, ""),
+                       mgp::Parameter(shortest_paths::kArgumentDefaultWeight, mgp::Type::Double, 1.0),
+                       mgp::Parameter(shortest_paths::kArgumentDefaultScore, mgp::Type::Double, 1.0),
+                       mgp::Parameter(shortest_paths::kArgumentCullAscending, mgp::Type::Bool, true)},
+                      {mgp::Return(shortest_paths::kReturnNegativeCycle, mgp::Type::Bool),
+                       mgp::Return(shortest_paths::kReturnIndex, mgp::Type::Int),
+                       mgp::Return(shortest_paths::kReturnSourceNode, mgp::Type::Node),
+                       mgp::Return(shortest_paths::kReturnTargetNode, mgp::Type::Node),
+                       mgp::Return(shortest_paths::kReturnTotalCost, mgp::Type::Double),
+                       mgp::Return(shortest_paths::kReturnCosts, return_costs_type),
+                       mgp::Return(shortest_paths::kReturnPath, mgp::Type::Path)},
+                      module, memory);
+
+    mgp::AddProcedure(DisjointKShortestPaths, shortest_paths::kProcedureDisjointKShortest, mgp::ProcedureType::Read,
+                      {mgp::Parameter(shortest_paths::kArgumentSourceNode, mgp::Type::Node),
+                       mgp::Parameter(shortest_paths::kArgumentTargetNode, mgp::Type::Node),
+                       mgp::Parameter(shortest_paths::kArgumentK, mgp::Type::Int, 0L),
+                       mgp::Parameter(shortest_paths::kArgumentRelationshipWeightProperty, mgp::Type::String, ""),
+                       mgp::Parameter(shortest_paths::kArgumentRelationshipScoreProperty, mgp::Type::String, ""),
+                       mgp::Parameter(shortest_paths::kArgumentDefaultWeight, mgp::Type::Double, 1.0),
+                       mgp::Parameter(shortest_paths::kArgumentDefaultScore, mgp::Type::Double, 1.0),
+                       mgp::Parameter(shortest_paths::kArgumentCullPerRound, mgp::Type::Int, 1L),
+                       mgp::Parameter(shortest_paths::kArgumentCullAscending, mgp::Type::Bool, true),
+                       mgp::Parameter(shortest_paths::kArgumentRelationshipFixedCostProperty, mgp::Type::String, ""),
+                       mgp::Parameter(shortest_paths::kArgumentDefaultFixedCost, mgp::Type::Double, 0.0),
+                       mgp::Parameter(shortest_paths::kArgumentFlowIn, mgp::Type::Double, 0.0),
+                       mgp::Parameter(shortest_paths::kArgumentWeightTransform, mgp::Type::String, "")},
+                      {mgp::Return(shortest_paths::kReturnIndex, mgp::Type::Int),
+                       mgp::Return(shortest_paths::kReturnSourceNode, mgp::Type::Node),
+                       mgp::Return(shortest_paths::kReturnTargetNode, mgp::Type::Node),
+                       mgp::Return(shortest_paths::kReturnTotalCost, mgp::Type::Double),
+                       mgp::Return(shortest_paths::kReturnCosts, return_costs_type),
+                       mgp::Return(shortest_paths::kReturnPath, mgp::Type::Path)},
+                      module, memory);
+
+    mgp::Map ssp_defaults{{shortest_paths::kArgumentRelationshipWeightProperty, mgp::Value("")},
+                          {shortest_paths::kArgumentRelationshipCapacityProperty, mgp::Value("")},
+                          {shortest_paths::kArgumentRelationshipFactorProperty, mgp::Value("")},
+                          {shortest_paths::kArgumentDefaultWeight, mgp::Value(1.0)},
+                          {shortest_paths::kArgumentDefaultCapacity, mgp::Value(0.0)},
+                          {shortest_paths::kArgumentDefaultFactor, mgp::Value(1.0)},
+                          {shortest_paths::kArgumentFlowConversion, mgp::Value("")},
+                          {shortest_paths::kArgumentEpsilon, mgp::Value(1.0e-6)},
+                          {shortest_paths::kArgumentRelationshipFixedCostProperty, mgp::Value("")},
+                          {shortest_paths::kArgumentDefaultFixedCost, mgp::Value(0.0)},
+                          {shortest_paths::kArgumentFlowIn, mgp::Value(0.0)},
+                          {shortest_paths::kArgumentWeightTransform, mgp::Value("")}};
+
+    mgp::AddProcedure(SuccessiveShortestPaths, shortest_paths::kProcedureSuccessiveShortestPaths,
+                      mgp::ProcedureType::Read,
+                      {mgp::Parameter(shortest_paths::kArgumentSourceNode, mgp::Type::Node),
+                       mgp::Parameter(shortest_paths::kArgumentTargetNode, mgp::Type::Node),
+                       mgp::Parameter(shortest_paths::kArgumentFlowIn, mgp::Type::Double),
+                       mgp::Parameter(shortest_paths::kArgumentOptions, mgp::Type::Map, mgp::Value(ssp_defaults))},
+                      {mgp::Return(shortest_paths::kReturnIndex, mgp::Type::Int),
+                       mgp::Return(shortest_paths::kReturnSourceNode, mgp::Type::Node),
+                       mgp::Return(shortest_paths::kReturnTargetNode, mgp::Type::Node),
+                       mgp::Return(shortest_paths::kReturnTotalCost, mgp::Type::Double),
+                       mgp::Return(shortest_paths::kReturnCosts, return_costs_type),
+                       mgp::Return(shortest_paths::kReturnPathInputFlow, mgp::Type::Double),
+                       mgp::Return(shortest_paths::kReturnFlows, return_costs_type),
+                       mgp::Return(shortest_paths::kReturnPath, mgp::Type::Path)},
+                      module, memory);
+
+    mgp::Map opt_flows_defaults{
+        {sp::kArgumentInitialAllocations, mgp::Value()},
+        {sp::kArgumentInitialAllocationAreRatios, mgp::Value(false)},
+        {sp::kArgumentFtol, mgp::Value(1.0e-6)},
+        {sp::kArgumentPtol, mgp::Value(1.0e-6)},
+        {sp::kArgumentXtol, mgp::Value(1.0e-4)},
+        {sp::kArgumentMaxIter, mgp::Value(50L)},
+        {sp::kArgumentFit2PointQuadratic, mgp::Value(false)},
+    };
+
+    mgp::AddProcedure(OptimizeFlowsProc, sp::kProcedureOptimizeFlows, mgp::ProcedureType::Read,
+                      {
+                          {sp::kArgumentPaths, {mgp::Type::List, mgp::Type::Path}},
+                          {sp::kArgumentFlowIn, mgp::Type::Double},
+                          {sp::kArgumentRelationshipXCoordProperty, mgp::Type::String},
+                          {sp::kArgumentRelationshipYCoordProperty, mgp::Type::String},
+                          {sp::kArgumentOptions, mgp::Type::Map, mgp::Value(opt_flows_defaults)},
+                      },
+                      {
+                          {sp::kReturnFlows, {mgp::Type::List, mgp::Type::Double}},
+                          {sp::kReturnFlowRatios, {mgp::Type::List, mgp::Type::Double}},
+                          {sp::kReturnExceptedOutputFlow, mgp::Type::Double},
+                      },
+                      module, memory);
+
+  } catch (const std::exception &e) {
+    return 1;
+  }
+
+  return 0;
 }
 
 extern "C" int mgp_shutdown_module() { return 0; }

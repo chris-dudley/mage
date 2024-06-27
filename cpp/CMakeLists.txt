@@ -46,14 +46,14 @@ ExternalProject_Add(gtest-proj
   PREFIX ${GTEST_ROOT}
   INSTALL_DIR ${GTEST_ROOT}
   GIT_REPOSITORY https://github.com/google/googletest.git
-  GIT_TAG release-1.11.0
+  GIT_TAG v1.14.0
   CMAKE_ARGS "-DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>"
   "-DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}"
   "-DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
   "-DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}")
 set(GTEST_INCLUDE_DIR ${GTEST_ROOT}/include)
-set(GTEST_LIBRARY_PATH ${GTEST_ROOT}/lib/${CMAKE_FIND_LIBRARY_PREFIXES}gtest.a)
-set(GTEST_DEBUG_LIBRARY_PATH ${GTEST_ROOT}/lib/${CMAKE_FIND_LIBRARY_PREFIXES}gtestd.a)
+set(GTEST_LIBRARY_PATH ${GTEST_ROOT}/${CMAKE_INSTALL_LIBDIR}/${CMAKE_FIND_LIBRARY_PREFIXES}gtest.a)
+set(GTEST_DEBUG_LIBRARY_PATH ${GTEST_ROOT}/${CMAKE_INSTALL_LIBDIR}/${CMAKE_FIND_LIBRARY_PREFIXES}gtestd.a)
 add_library(mage_gtest STATIC IMPORTED)
 set_target_properties(mage_gtest PROPERTIES
   IMPORTED_LOCATION "${GTEST_LIBRARY_PATH}"
@@ -77,13 +77,14 @@ ExternalProject_Add(uuid-proj
   PREFIX ${UUID_ROOT}
   INSTALL_DIR ${UUID_ROOT}
   GIT_REPOSITORY https://github.com/mariusbancila/stduuid.git
-  GIT_TAG v1.2.2
+  GIT_TAG v1.2.3
   CMAKE_ARGS "-DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>"
   "-DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
-  "-DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}")
+  "-DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}"
+  "-DUUID_USING_CXX20_SPAN=on")
 set(UUID_INCLUDE_DIR ${UUID_ROOT}/include)
 add_library(mage_uuid INTERFACE)
-target_include_directories(mage_uuid INTERFACE ${UUID_INCLUDE_DIR}/gsl)
+#target_include_directories(mage_uuid INTERFACE ${UUID_INCLUDE_DIR}/gsl)
 target_include_directories(mage_uuid INTERFACE ${UUID_INCLUDE_DIR})
 add_dependencies(mage_uuid uuid-proj)
 
@@ -103,7 +104,7 @@ ExternalProject_Add(mgclient-proj
   ${MACOSX_OPENSSL_ROOTDIR_FLAG})
 
 set(MGCLIENT_INCLUDE_DIRS ${MGCLIENT_ROOT}/include ${MGCLIENT_ROOT}/mgclient_cpp/include)
-set(MGCLIENT_LIBRARY_PATH ${MGCLIENT_ROOT}/lib/${CMAKE_FIND_LIBRARY_PREFIXES}mgclient.a)
+set(MGCLIENT_LIBRARY_PATH ${MGCLIENT_ROOT}/${CMAKE_INSTALL_LIBDIR}/${CMAKE_FIND_LIBRARY_PREFIXES}mgclient.a)
 
 add_library(mgclient STATIC IMPORTED)
 set_target_properties(mgclient PROPERTIES
@@ -116,7 +117,11 @@ add_subdirectory(mg_utility)
 
 FetchContent_Declare(fmt
   GIT_REPOSITORY https://github.com/fmtlib/fmt.git
-  GIT_TAG 9.1.0
+  GIT_TAG 10.2.1
+  CMAKE_ARGS "-DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>"
+  "-DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+  "-DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}"
+  "-DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}"
 )
 FetchContent_MakeAvailable(fmt)
 
@@ -125,6 +130,10 @@ FetchContent_Declare(
   highs
   GIT_REPOSITORY "https://github.com/ERGO-Code/HiGHS.git"
   GIT_TAG        "bazel"
+  CMAKE_ARGS "-DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>"
+  "-DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+  "-DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}"
+  "-DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}"
 )
 set(FAST_BUILD ON CACHE INTERNAL "Fast Build")
 FetchContent_MakeAvailable(highs)
